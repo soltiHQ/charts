@@ -1,0 +1,3 @@
+# The PR flow lints and renders the chart with each ci/*-values.yaml file.
+secrets:
+  existingSecret: podium-secrets
