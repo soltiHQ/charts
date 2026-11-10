@@ -1,0 +1,36 @@
+{{- if .Values.ops.service.enabled }}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "podium.fullname" . }}-test-readyz
+  labels:
+    {{- include "podium.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  restartPolicy: Never
+  automountServiceAccountToken: false
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 65532
+    runAsGroup: 65532
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+    - name: readyz
+      image: {{ .Values.tests.image }}
+      command:
+        - wget
+        - -q
+        - -O-
+        - -T
+        - "5"
+        - http://{{ include "podium.fullname" . }}-ops:{{ .Values.ops.service.port }}/readyz
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop:
+            - ALL
+{{- end }}
