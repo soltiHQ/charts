@@ -1,0 +1,207 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "podium.fullname" . }}
+  labels:
+    {{- include "podium.labels" . | nindent 4 }}
+spec:
+  # One standalone node owns its data directory: a second replica would be a
+  # second, separate podium with its own state, so this is not a setting.
+  replicas: 1
+  serviceName: {{ include "podium.fullname" . }}-headless
+  selector:
+    matchLabels:
+      {{- include "podium.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- if not .Values.secrets.existingSecret }}
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+        {{- end }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "podium.selectorLabels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "podium.serviceAccountName" . }}
+      automountServiceAccountToken: {{ .Values.serviceAccount.automountServiceAccountToken }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
+      containers:
+        - name: podium
+          image: {{ include "podium.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - --config
+            - /etc/podium/podium.yaml
+          env:
+            - name: SOLTI_CLUSTER_STANDALONE_DATA_DIR
+              value: {{ include "podium.dataDir" . }}
+            - name: SOLTI_AUTH_JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "podium.secretName" . }}
+                  key: {{ .Values.secrets.keys.jwtSecret }}
+            - name: SOLTI_AGENT_AUTH_ENROLL_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "podium.secretName" . }}
+                  key: {{ .Values.secrets.keys.enrollSecret }}
+                  optional: {{ .Values.secrets.allowOpenEnrollment }}
+            - name: SOLTI_BOOTSTRAP_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "podium.secretName" . }}
+                  key: {{ .Values.secrets.keys.bootstrapAdminPassword }}
+                  optional: true
+            {{- if .Values.tls.server.secretName }}
+            - name: SOLTI_TLS_SERVER_CERT_FILE
+              value: /etc/podium-tls/server/tls.crt
+            - name: SOLTI_TLS_SERVER_KEY_FILE
+              value: /etc/podium-tls/server/tls.key
+            {{- end }}
+            {{- if .Values.tls.server.clientCA.secretName }}
+            - name: SOLTI_TLS_SERVER_CLIENT_CA_FILE
+              value: /etc/podium-tls/client-ca/{{ .Values.tls.server.clientCA.key }}
+            {{- end }}
+            {{- with .Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- with .Values.extraEnvFrom }}
+          envFrom:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+            - name: ops
+              containerPort: 8081
+              protocol: TCP
+            - name: discovery
+              containerPort: 8082
+              protocol: TCP
+            - name: grpc
+              containerPort: 50051
+              protocol: TCP
+          startupProbe:
+            httpGet:
+              path: /livez
+              port: ops
+            periodSeconds: {{ .Values.probes.startup.periodSeconds }}
+            failureThreshold: {{ .Values.probes.startup.failureThreshold }}
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: ops
+            periodSeconds: {{ .Values.probes.readiness.periodSeconds }}
+            failureThreshold: {{ .Values.probes.readiness.failureThreshold }}
+          livenessProbe:
+            httpGet:
+              path: /livez
+              port: ops
+            periodSeconds: {{ .Values.probes.liveness.periodSeconds }}
+            failureThreshold: {{ .Values.probes.liveness.failureThreshold }}
+          {{- with .Values.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/podium
+            - name: config
+              mountPath: /etc/podium
+              readOnly: true
+            {{- if .Values.tls.server.secretName }}
+            - name: tls-server
+              mountPath: /etc/podium-tls/server
+              readOnly: true
+            {{- end }}
+            {{- if .Values.tls.server.clientCA.secretName }}
+            - name: tls-client-ca
+              mountPath: /etc/podium-tls/client-ca
+              readOnly: true
+            {{- end }}
+            {{- with .Values.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "podium.fullname" . }}
+        {{- if .Values.tls.server.secretName }}
+        - name: tls-server
+          secret:
+            secretName: {{ .Values.tls.server.secretName }}
+            items:
+              - key: tls.crt
+                path: tls.crt
+              - key: tls.key
+                path: tls.key
+        {{- end }}
+        {{- if .Values.tls.server.clientCA.secretName }}
+        - name: tls-client-ca
+          secret:
+            secretName: {{ .Values.tls.server.clientCA.secretName }}
+            items:
+              - key: {{ .Values.tls.server.clientCA.key }}
+                path: {{ .Values.tls.server.clientCA.key }}
+        {{- end }}
+        {{- with .Values.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+        {{- if not .Values.persistence.enabled }}
+        - name: data
+          emptyDir: {}
+        {{- else if .Values.persistence.existingClaim }}
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ .Values.persistence.existingClaim }}
+        {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+  {{- if and .Values.persistence.enabled (not .Values.persistence.existingClaim) }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          {{- include "podium.selectorLabels" . | nindent 10 }}
+        {{- with .Values.persistence.annotations }}
+        annotations:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+      spec:
+        accessModes:
+          {{- toYaml .Values.persistence.accessModes | nindent 10 }}
+        {{- if .Values.persistence.storageClass }}
+        storageClassName: {{ if eq "-" .Values.persistence.storageClass }}""{{ else }}{{ .Values.persistence.storageClass }}{{ end }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.persistence.size }}
+  {{- end }}

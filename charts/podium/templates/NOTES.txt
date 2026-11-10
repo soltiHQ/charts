@@ -1,0 +1,55 @@
+podium {{ include "podium.imageTag" . }} runs as the StatefulSet {{ include "podium.fullname" . }} in {{ .Release.Namespace }}.
+
+Web UI and API:
+{{- if .Values.ingress.enabled }}
+{{- range .Values.ingress.hosts }}
+  http{{ if $.Values.ingress.tls }}s{{ end }}://{{ .host }}
+{{- end }}
+{{- else }}
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "podium.fullname" . }} 8080:{{ .Values.service.port }}
+  then open http://127.0.0.1:8080
+{{- end }}
+
+First administrator: user admin.
+{{- if or .Values.secrets.bootstrapAdminPassword .Values.secrets.existingSecret }}
+  Its password is the Secret's {{ .Values.secrets.keys.bootstrapAdminPassword }} key, when set. Change it after the
+  first login, then remove that key: podium warns about it at each start while users exist.
+{{- else }}
+  No bootstrap password was given, so podium generated one into
+  {{ include "podium.dataDir" . }}/bootstrap-admin-password on the volume. The image has no shell, so
+  kubectl exec and kubectl cp cannot read it, and podium ignores a bootstrap password once the user
+  exists: uninstall, delete the PersistentVolumeClaim data-{{ include "podium.fullname" . }}-0, and install
+  again with secrets.bootstrapAdminPassword set.
+{{- end }}
+
+Agents reach the {{ include "podium.fullname" . }}-agents Service ({{ .Values.agents.service.type }}):
+  HTTP discovery on {{ .Values.agents.service.discoveryPort }}, gRPC on {{ .Values.agents.service.grpcPort }}.
+{{- if eq .Values.agents.service.type "ClusterIP" }}
+  It is reachable from inside the cluster only: agents outside it need agents.service.type LoadBalancer or NodePort.
+{{- end }}
+{{- if or .Values.secrets.enrollSecret .Values.secrets.existingSecret }}
+  An agent's token, derived from the enrollment secret:
+  kubectl -n {{ .Release.Namespace }} exec {{ include "podium.fullname" . }}-0 -- /podium agent-token <agent-id>
+{{- else }}
+  WARNING: no enrollment secret: any host that reaches these ports can enroll a new agent ID.
+{{- end }}
+{{- if .Values.tls.server.secretName }}
+  The listeners serve TLS with the certificate of the Secret {{ .Values.tls.server.secretName }}{{ if .Values.tls.server.clientCA.secretName }}, and the agents' listeners require a client certificate{{ end }}.
+{{- else }}
+  The listeners serve plaintext: the SDK sends an agent's token only over TLS, unless the agent allows
+  insecure token transport. Set tls.server.secretName for TLS.
+{{- end }}
+  podium calls each agent at the endpoint it registers, so the agents' endpoints must be reachable from this pod.
+
+{{- if not .Values.persistence.enabled }}
+
+WARNING: persistence is off: the state lives in an emptyDir and is lost with the pod.
+{{- end }}
+
+Health, build and metrics (no authentication; keep internal):
+  kubectl -n {{ .Release.Namespace }} port-forward pod/{{ include "podium.fullname" . }}-0 8081:8081
+  curl http://127.0.0.1:8081/readyz
+  curl http://127.0.0.1:8081/version
+{{- if .Values.ops.service.enabled }}
+  helm -n {{ .Release.Namespace }} test {{ .Release.Name }}
+{{- end }}

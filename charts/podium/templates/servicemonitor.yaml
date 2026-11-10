@@ -1,0 +1,24 @@
+{{- if .Values.metrics.serviceMonitor.enabled }}
+{{- if not .Values.ops.service.enabled }}
+{{- fail "metrics.serviceMonitor.enabled needs ops.service.enabled: the ServiceMonitor scrapes the ops Service" }}
+{{- end }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "podium.fullname" . }}
+  labels:
+    {{- include "podium.labels" . | nindent 4 }}
+    {{- with .Values.metrics.serviceMonitor.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "podium.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: ops
+  endpoints:
+    - port: ops
+      path: /metrics
+      interval: {{ .Values.metrics.serviceMonitor.interval }}
+      scrapeTimeout: {{ .Values.metrics.serviceMonitor.scrapeTimeout }}
+{{- end }}

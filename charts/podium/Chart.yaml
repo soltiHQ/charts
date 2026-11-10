@@ -1,0 +1,15 @@
+apiVersion: v2
+name: podium
+description: podium, the solti control plane, as one standalone node with its state on a persistent volume
+type: application
+version: 0.1.0
+appVersion: "v0.0.1-rc.1"
+kubeVersion: ">=1.25.0-0"
+home: https://github.com/soltiHQ/podium
+sources:
+  - https://github.com/soltiHQ/podium
+  - https://github.com/soltiHQ/charts
+keywords:
+  - solti
+  - podium
+  - control-plane

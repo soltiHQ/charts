@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "podium.fullname" . }}
+  labels:
+    {{- include "podium.labels" . | nindent 4 }}
+data:
+  podium.yaml: |
+    {{- toYaml (default (dict) .Values.config) | nindent 4 }}

@@ -1,0 +1,213 @@
+# The chart runs one podium node in standalone mode: its state lives on one
+# ReadWriteOnce volume, so the StatefulSet always has one replica. A raft
+# cluster is not covered by this chart.
+
+image:
+  repository: ghcr.io/soltihq/podium
+  # Defaults to the chart's appVersion.
+  tag: ""
+  # Pins the image by digest; it wins over the tag when set.
+  digest: ""
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+
+nameOverride: ""
+fullnameOverride: ""
+
+# The secrets podium reads from its environment. Keep their values: a changed
+# enrollment secret locks out every agent enrolled under the old one, and a
+# changed JWT secret ends every session.
+secrets:
+  # An existing Secret that holds the keys below. When empty, the chart makes a
+  # Secret from jwtSecret, enrollSecret and bootstrapAdminPassword.
+  existingSecret: ""
+  keys:
+    jwtSecret: jwt-secret
+    enrollSecret: enroll-secret
+    bootstrapAdminPassword: bootstrap-admin-password
+  # SOLTI_AUTH_JWT_SECRET: 32 bytes or more (openssl rand -hex 32).
+  jwtSecret: ""
+  # SOLTI_AGENT_AUTH_ENROLL_SECRET: 32 bytes or more (openssl rand -hex 32).
+  enrollSecret: ""
+  # SOLTI_BOOTSTRAP_ADMIN_PASSWORD: the first administrator's password, 12
+  # characters to 72 bytes, used on the first start only. Set it for the first
+  # install: the image has no shell, so the password podium generates without
+  # it stays in a file in the volume that kubectl cannot read. Remove it once
+  # you changed the password; podium warns about it at each start until then.
+  bootstrapAdminPassword: ""
+  # Without an enrollment secret, any host that reaches the agents' listeners
+  # can enroll a new agent ID (trust on first use). The chart refuses to render
+  # without one unless this is true.
+  allowOpenEnrollment: false
+
+# podium.yaml, mounted at /etc/podium/podium.yaml and passed with --config.
+# Loading is strict: a key that is not a setting, or a key without a value,
+# stops podium at start. The environment wins over this file; the chart sets
+# SOLTI_CLUSTER_STANDALONE_DATA_DIR, and the image sets SOLTI_OPS_ADDR=:8081.
+# Every setting: https://github.com/soltiHQ/podium/blob/main/internal/config/README.md#every-setting
+config:
+  log:
+    level: info
+    format: json
+  server:
+    # The time Kubernetes needs to take the pod out of its Services after
+    # /readyz turns to 503 at SIGTERM.
+    shutdown_delay: 5s
+    shutdown_timeout: 15s
+  # Behind an ingress that terminates TLS, list its pods' CIDR so podium sees
+  # the client's IP and that it used HTTPS, for example:
+  # trusted_proxies:
+  #   - 10.42.0.0/16
+  # or, if the ingress cannot be listed, keep the cookies Secure regardless:
+  # auth:
+  #   cookie_secure: always
+
+# TLS on podium's own listeners, tls.server: 8080, 8082 and 50051 (the ops
+# listener stays plain HTTP). The SDK sends an agent's token only over TLS,
+# unless the agent allows otherwise. podium reads the files at start only: a
+# renewed certificate takes effect when the pod restarts. With TLS on 8080, an
+# ingress must speak HTTPS to the UI Service (its backend-protocol setting).
+tls:
+  server:
+    # A kubernetes.io/tls Secret (tls.crt, tls.key), cert-manager's for example.
+    secretName: ""
+    # The agents' CA: with it, the agents' listeners (8082, 50051) require a
+    # client certificate of that CA. The UI never asks for one.
+    clientCA:
+      secretName: ""
+      key: ca.crt
+
+# Extra environment variables, volumes and mounts for the podium container,
+# for tls.client (podium as a client of the agents) for instance.
+extraEnv: []
+extraEnvFrom: []
+extraVolumes: []
+extraVolumeMounts: []
+
+persistence:
+  # Without persistence the state lives in an emptyDir and is lost with the pod.
+  enabled: true
+  # An existing PersistentVolumeClaim to use instead of the StatefulSet's own.
+  existingClaim: ""
+  # "" uses the cluster's default StorageClass; "-" sets storageClassName "".
+  storageClass: ""
+  accessModes:
+    - ReadWriteOnce
+  size: 1Gi
+  annotations: {}
+
+# The web UI and the REST API (8080).
+service:
+  type: ClusterIP
+  port: 8080
+  annotations: {}
+
+# The agents' listeners: HTTP discovery (8082) and gRPC (50051). Agents outside
+# the cluster need a LoadBalancer or a NodePort here.
+agents:
+  service:
+    type: ClusterIP
+    annotations: {}
+    discoveryPort: 8082
+    grpcPort: 50051
+    # For type NodePort or LoadBalancer; empty lets Kubernetes choose.
+    discoveryNodePort: ""
+    grpcNodePort: ""
+    # Local keeps the agents' source IPs visible to podium.
+    externalTrafficPolicy: ""
+
+# The ops listener (8081): /livez, /readyz, /leaderz, /version and /metrics,
+# plain HTTP without authentication. The probes use it on the pod; this Service
+# is for scraping, and must stay internal.
+ops:
+  service:
+    enabled: true
+    port: 8081
+    annotations: {}
+
+ingress:
+  enabled: false
+  className: ""
+  # A proxy in front of the UI keeps its read timeout above 15 seconds: a quiet
+  # event or log stream sends a keepalive only every 15 seconds.
+  annotations: {}
+  hosts:
+    - host: podium.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+  #  - secretName: podium-tls
+  #    hosts:
+  #      - podium.example.com
+
+metrics:
+  serviceMonitor:
+    # Needs the Prometheus operator's ServiceMonitor CRD, and ops.service.enabled.
+    enabled: false
+    interval: 30s
+    scrapeTimeout: 10s
+    labels: {}
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+  # podium does not call the Kubernetes API.
+  automountServiceAccountToken: false
+
+podAnnotations: {}
+podLabels: {}
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  # fsGroup makes the volume writable by podium; OnRootMismatch keeps Kubernetes
+  # from adding group permissions to the data directory inside it at each start,
+  # which podium would refuse.
+  fsGroup: 65532
+  fsGroupChangePolicy: OnRootMismatch
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    memory: 512Mi
+
+# A graceful stop takes up to server.shutdown_delay, plus
+# server.shutdown_timeout, plus 30 seconds to close the store: 50 seconds with
+# the defaults above. Raise this with them.
+terminationGracePeriodSeconds: 60
+
+probes:
+  startup:
+    periodSeconds: 2
+    failureThreshold: 60
+  readiness:
+    periodSeconds: 5
+    failureThreshold: 3
+  liveness:
+    periodSeconds: 10
+    failureThreshold: 6
+
+priorityClassName: ""
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+# helm test: checks /readyz on the ops Service.
+tests:
+  # busybox:1.37
+  image: busybox@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec
