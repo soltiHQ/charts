@@ -1,10 +1,6 @@
-{{/*
-The application's name, cut to 63 characters: podium, not the chart's name
-(podium-chart), so that a release named podium makes the objects podium,
-podium-agents, podium-0 and so on.
-*/}}
+{{/* The chart name, cut to 63 characters. */}}
 {{- define "podium.name" -}}
-{{- default "podium" .Values.nameOverride | trunc 63 | trimSuffix "-" }}
+{{- default .Chart.Name .Values.nameOverride | trunc 63 | trimSuffix "-" }}
 {{- end }}
 
 {{/* The release's full name, cut to 63 characters. */}}

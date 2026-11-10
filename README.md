@@ -5,10 +5,10 @@ Helm charts for solti, published as OCI artifacts on GHCR:
 
 | Chart | What it deploys |
 | -- | -- |
-| [podium-chart](charts/podium-chart/README.md) | podium, the solti control plane, as one standalone node with its state on a persistent volume. |
+| [podium](charts/podium/README.md) | podium, the solti control plane, as one standalone node with its state on a persistent volume. |
 
 ```sh
-helm install podium oci://ghcr.io/soltihq/charts/podium-chart --version 0.0.1 \
+helm install podium oci://ghcr.io/soltihq/charts/podium --version 0.0.1 \
   -n podium --create-namespace --set secrets.existingSecret=podium-secrets
 ```
 
@@ -39,5 +39,5 @@ repository's workflow may push the next versions.
 
 Before the first publish, an owner of the soltiHQ organization must allow this
 repository's workflows to publish packages with `GITHUB_TOKEN`. A package GHCR
-creates may start private: make `charts/podium-chart` public in the organization's
+creates may start private: make `charts/podium` public in the organization's
 package settings for installs without credentials.

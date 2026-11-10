@@ -1,4 +1,4 @@
-# podium-chart
+# podium
 
 This chart runs [podium](https://github.com/soltiHQ/podium), the solti control
 plane, as one standalone node: a StatefulSet with one replica and its state on
@@ -23,11 +23,11 @@ kubectl -n podium create secret generic podium-secrets \
   --from-literal=enroll-secret="$(openssl rand -hex 32)" \
   --from-literal=bootstrap-admin-password='<12 characters to 72 bytes>'
 
-helm install podium oci://ghcr.io/soltihq/charts/podium-chart --version 0.0.1 \
+helm install podium oci://ghcr.io/soltihq/charts/podium --version 0.0.1 \
   -n podium --set secrets.existingSecret=podium-secrets
 ```
 
-From a checkout of this repository, `./charts/podium-chart` takes the place of the
+From a checkout of this repository, `./charts/podium` takes the place of the
 OCI reference.
 
 The chart can make the Secret itself from `secrets.jwtSecret`,
