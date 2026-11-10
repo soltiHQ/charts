@@ -1,14 +1,17 @@
 apiVersion: v2
-name: podium
+name: podium-chart
 description: podium, the solti control plane, as one standalone node with its state on a persistent volume
 type: application
-version: 0.1.0
+version: 0.0.1
 appVersion: "v0.0.1-rc.1"
 kubeVersion: ">=1.25.0-0"
 home: https://github.com/soltiHQ/podium
+# The first source is the org.opencontainers.image.source of the chart's OCI
+# package, which links the GHCR package to this repository, the one that pushes
+# it: keep soltiHQ/charts first.
 sources:
-  - https://github.com/soltiHQ/podium
   - https://github.com/soltiHQ/charts
+  - https://github.com/soltiHQ/podium
 keywords:
   - solti
   - podium

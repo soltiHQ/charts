@@ -1,0 +1,37 @@
+# Every optional part of the chart at once, for the PR flow's render.
+secrets:
+  jwtSecret: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+  enrollSecret: fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210
+  bootstrapAdminPassword: ci-only-password
+tls:
+  server:
+    secretName: podium-tls
+    clientCA:
+      secretName: agents-ca
+agents:
+  service:
+    type: LoadBalancer
+    externalTrafficPolicy: Local
+ingress:
+  enabled: true
+  className: traefik
+  tls:
+    - secretName: podium-ui-tls
+      hosts:
+        - podium.example.com
+metrics:
+  serviceMonitor:
+    enabled: true
+persistence:
+  storageClass: "-"
+extraVolumes:
+  - name: client-tls
+    secret:
+      secretName: podium-client-tls
+extraVolumeMounts:
+  - name: client-tls
+    mountPath: /etc/podium-tls/client
+    readOnly: true
+extraEnv:
+  - name: SOLTI_TLS_CLIENT_CA_FILE
+    value: /etc/podium-tls/client/ca.crt

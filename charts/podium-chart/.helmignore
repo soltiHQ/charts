@@ -7,3 +7,5 @@
 *.bak
 *.tmp
 *.orig
+# The PR flow's values files.
+ci/

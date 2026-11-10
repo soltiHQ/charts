@@ -1,0 +1,39 @@
+name: Release flow
+
+# Every chart version on main that GHCR does not hold yet is pushed to
+# oci://ghcr.io/soltihq/charts/<chart>; a version already there is never pushed
+# again, so a change to a chart needs a new version (the PR flow checks it).
+on:
+  push:
+    branches: [main]
+    paths: ['charts/**']
+  workflow_dispatch: {}
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  publish:
+    name: Publish charts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: azure/setup-helm@2f5e7bc67f1f9972ab16657bb795f36d8f04de0e # v5.1.0
+        with:
+          version: v4.3.1
+      - name: Log in to GHCR
+        env:
+          ACTOR: ${{ github.actor }}
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: printf '%s' "$TOKEN" | helm registry login ghcr.io --username "$ACTOR" --password-stdin
+      - name: Push the chart versions GHCR does not hold
+        run: ./scripts/publish-charts.sh oci://ghcr.io/soltihq/charts
