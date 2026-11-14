@@ -73,20 +73,3 @@ spec:
       targetPort: ops
       protocol: TCP
 {{- end }}
----
-# The StatefulSet's governing Service.
-apiVersion: v1
-kind: Service
-metadata:
-  name: {{ include "podium.fullname" . }}-headless
-  labels:
-    {{- include "podium.labels" . | nindent 4 }}
-spec:
-  clusterIP: None
-  selector:
-    {{- include "podium.selectorLabels" . | nindent 4 }}
-  ports:
-    - name: http
-      port: 8080
-      targetPort: http
-      protocol: TCP

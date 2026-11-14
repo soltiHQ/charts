@@ -1,8 +1,8 @@
 apiVersion: v2
 name: podium
-description: podium, the solti control plane, as one standalone node with its state on a persistent volume
+description: podium, the solti control plane, as one node with its state in memory, or as replicas that share a Postgres database
 type: application
-version: 0.0.1
+version: 0.0.2
 appVersion: "v0.0.1-rc.1"
 kubeVersion: ">=1.25.0-0"
 home: https://github.com/soltiHQ/podium

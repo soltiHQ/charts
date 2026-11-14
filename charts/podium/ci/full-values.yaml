@@ -22,8 +22,6 @@ ingress:
 metrics:
   serviceMonitor:
     enabled: true
-persistence:
-  storageClass: "-"
 extraVolumes:
   - name: client-tls
     secret:

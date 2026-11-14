@@ -1,0 +1,96 @@
+{{- if and (eq (include "podium.mode" .) "database") .Values.migrate.job.enabled }}
+{{- /*
+podium migrate as a Helm hook, before the install and before each upgrade. A
+pre-install hook runs before the release's own ConfigMap and Secret exist, and a
+pre-upgrade one before the new ones replace the old, so the Job brings copies of
+its own, hooks too, from the same values: it migrates the database the new
+release will use, on install and on upgrade.
+*/ -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "podium.fullname" . }}-migrate
+  labels:
+    {{- include "podium.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "-10"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+data:
+  podium.yaml: |
+    {{- toYaml (default (dict) .Values.config) | nindent 4 }}
+{{- if not .Values.secrets.existingSecret }}
+---
+{{ include "podium.secret" (dict "root" . "name" (include "podium.migrateSecretName" .) "hook" true) }}
+{{- end }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "podium.fullname" . }}-migrate
+  labels:
+    {{- include "podium.labels" . | nindent 4 }}
+    app.kubernetes.io/component: migrate
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "0"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 2
+  activeDeadlineSeconds: {{ .Values.migrate.job.activeDeadlineSeconds }}
+  template:
+    metadata:
+      # Not the selector labels: the Services must never list this pod.
+      labels:
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/component: migrate
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      restartPolicy: Never
+      # The release's ServiceAccount does not exist yet on install.
+      automountServiceAccountToken: false
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: migrate
+          image: {{ include "podium.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - migrate
+            - --config
+            - /etc/podium/podium.yaml
+          env:
+            {{- include "podium.env" (dict "root" . "secret" (include "podium.migrateSecretName" .)) | nindent 12 }}
+          {{- with .Values.extraEnvFrom }}
+          envFrom:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          volumeMounts:
+            {{- include "podium.volumeMounts" . | nindent 12 }}
+      volumes:
+        {{- include "podium.volumes" (dict "root" . "config" (printf "%s-migrate" (include "podium.fullname" .))) | nindent 8 }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

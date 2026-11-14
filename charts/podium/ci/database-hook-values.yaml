@@ -1,0 +1,11 @@
+# The database mode with the chart's own Secret and the migration Job: the hook
+# brings copies of the ConfigMap and the Secret of its own.
+mode: database
+secrets:
+  jwtSecret: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+  enrollSecret: fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210
+  bootstrapAdminPassword: ci-only-password
+  databaseUrl: postgres://podium:ci-only-password@db-primary.example.com:5432/podium?sslmode=verify-full
+migrate:
+  job:
+    enabled: true

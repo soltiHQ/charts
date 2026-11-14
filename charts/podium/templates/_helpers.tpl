@@ -58,12 +58,122 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- default (include "podium.fullname" .) .Values.secrets.existingSecret }}
 {{- end }}
 
+{{/* The mode, memory or database; anything else stops the render. */}}
+{{- define "podium.mode" -}}
+{{- $mode := default "memory" .Values.mode -}}
+{{- if not (has $mode (list "memory" "database")) -}}
+{{- fail (printf "mode must be memory or database, not %q" $mode) -}}
+{{- end -}}
+{{- $mode -}}
+{{- end }}
+
+{{/* The Secret and the ConfigMap of the migration Job, a hook of its own. */}}
+{{- define "podium.migrateSecretName" -}}
+{{- default (printf "%s-migrate" (include "podium.fullname" .)) .Values.secrets.existingSecret }}
+{{- end }}
+
 {{/*
-The volume is mounted at /var/lib/podium, and podium keeps its state in a
-directory below it that it makes itself, mode 0700. The volume's own root may
-carry group or other permissions (fsGroup, or a hostPath provisioner that makes
-it 0777), which podium refuses on its data directory.
+The environment of the server and of the migration Job, which loads the same
+configuration. It takes the root context as "root" and the Secret to read as
+"secret". The database URLs reach the pod only as secretKeyRef, never as a
+literal or from the ConfigMap.
 */}}
-{{- define "podium.dataDir" -}}
-/var/lib/podium/data
+{{- define "podium.env" -}}
+{{- $root := .root -}}
+{{- $v := $root.Values -}}
+{{- $mode := include "podium.mode" $root -}}
+- name: SOLTI_CLUSTER_BACKEND
+  value: {{ $mode }}
+{{- if eq $mode "database" }}
+- name: SOLTI_CLUSTER_DATABASE_URL
+  valueFrom:
+    secretKeyRef:
+      name: {{ .secret }}
+      key: {{ $v.secrets.keys.databaseUrl }}
+- name: SOLTI_CLUSTER_DATABASE_REPLICA_URL
+  valueFrom:
+    secretKeyRef:
+      name: {{ .secret }}
+      key: {{ $v.secrets.keys.databaseReplicaUrl }}
+      optional: true
+{{- end }}
+- name: SOLTI_AUTH_JWT_SECRET
+  valueFrom:
+    secretKeyRef:
+      name: {{ .secret }}
+      key: {{ $v.secrets.keys.jwtSecret }}
+- name: SOLTI_AGENT_AUTH_ENROLL_SECRET
+  valueFrom:
+    secretKeyRef:
+      name: {{ .secret }}
+      key: {{ $v.secrets.keys.enrollSecret }}
+      optional: {{ $v.secrets.allowOpenEnrollment }}
+- name: SOLTI_BOOTSTRAP_ADMIN_PASSWORD
+  valueFrom:
+    secretKeyRef:
+      name: {{ .secret }}
+      key: {{ $v.secrets.keys.bootstrapAdminPassword }}
+      optional: true
+{{- if $v.tls.server.secretName }}
+- name: SOLTI_TLS_SERVER_CERT_FILE
+  value: /etc/podium-tls/server/tls.crt
+- name: SOLTI_TLS_SERVER_KEY_FILE
+  value: /etc/podium-tls/server/tls.key
+{{- end }}
+{{- if $v.tls.server.clientCA.secretName }}
+- name: SOLTI_TLS_SERVER_CLIENT_CA_FILE
+  value: /etc/podium-tls/client-ca/{{ $v.tls.server.clientCA.key }}
+{{- end }}
+{{- with $v.extraEnv }}
+{{ toYaml . }}
+{{- end }}
+{{- end }}
+
+{{/* The mounts that go with "podium.env" and "podium.volumes". */}}
+{{- define "podium.volumeMounts" -}}
+- name: config
+  mountPath: /etc/podium
+  readOnly: true
+{{- if .Values.tls.server.secretName }}
+- name: tls-server
+  mountPath: /etc/podium-tls/server
+  readOnly: true
+{{- end }}
+{{- if .Values.tls.server.clientCA.secretName }}
+- name: tls-client-ca
+  mountPath: /etc/podium-tls/client-ca
+  readOnly: true
+{{- end }}
+{{- with .Values.extraVolumeMounts }}
+{{ toYaml . }}
+{{- end }}
+{{- end }}
+
+{{/* The volumes, with the ConfigMap "config" to mount. */}}
+{{- define "podium.volumes" -}}
+{{- $v := .root.Values -}}
+- name: config
+  configMap:
+    name: {{ .config }}
+{{- if $v.tls.server.secretName }}
+- name: tls-server
+  secret:
+    secretName: {{ $v.tls.server.secretName }}
+    items:
+      - key: tls.crt
+        path: tls.crt
+      - key: tls.key
+        path: tls.key
+{{- end }}
+{{- if $v.tls.server.clientCA.secretName }}
+- name: tls-client-ca
+  secret:
+    secretName: {{ $v.tls.server.clientCA.secretName }}
+    items:
+      - key: {{ $v.tls.server.clientCA.key }}
+        path: {{ $v.tls.server.clientCA.key }}
+{{- end }}
+{{- with $v.extraVolumes }}
+{{ toYaml . }}
+{{- end }}
 {{- end }}

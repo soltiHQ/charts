@@ -1,0 +1,137 @@
+{{- $mode := include "podium.mode" . -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "podium.fullname" . }}
+  labels:
+    {{- include "podium.labels" . | nindent 4 }}
+spec:
+  {{- if eq $mode "database" }}
+  replicas: {{ .Values.replicas }}
+  # A new pod comes up, ready, before an old one stops, so a rollout never
+  # leaves fewer replicas than there are.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  {{- else }}
+  # One memory node owns its state: a second one would be a separate podium
+  # with its own, so the replicas are not a setting, and an update stops the old
+  # pod before it starts the new one, never two at once.
+  replicas: 1
+  strategy:
+    type: Recreate
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "podium.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- if not .Values.secrets.existingSecret }}
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+        {{- end }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "podium.selectorLabels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "podium.serviceAccountName" . }}
+      automountServiceAccountToken: {{ .Values.serviceAccount.automountServiceAccountToken }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
+      containers:
+        - name: podium
+          image: {{ include "podium.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - --config
+            - /etc/podium/podium.yaml
+          env:
+            {{- if eq $mode "database" }}
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            # host:port, an IPv6 host in brackets: podium takes the host and
+            # ignores the port. The brackets also hold an IPv4 address, which
+            # the forwarding strips, so one form serves both IP families.
+            - name: SOLTI_CLUSTER_DATABASE_ADVERTISE_ADDR
+              value: "[$(POD_IP)]:8080"
+            {{- if .Values.migrate.job.enabled }}
+            - name: SOLTI_CLUSTER_DATABASE_MIGRATE
+              value: "false"
+            {{- end }}
+            {{- end }}
+            {{- include "podium.env" (dict "root" . "secret" (include "podium.secretName" .)) | nindent 12 }}
+          {{- with .Values.extraEnvFrom }}
+          envFrom:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+            - name: ops
+              containerPort: 8081
+              protocol: TCP
+            - name: discovery
+              containerPort: 8082
+              protocol: TCP
+            - name: grpc
+              containerPort: 50051
+              protocol: TCP
+          startupProbe:
+            httpGet:
+              path: /livez
+              port: ops
+            periodSeconds: {{ .Values.probes.startup.periodSeconds }}
+            failureThreshold: {{ .Values.probes.startup.failureThreshold }}
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: ops
+            periodSeconds: {{ .Values.probes.readiness.periodSeconds }}
+            failureThreshold: {{ .Values.probes.readiness.failureThreshold }}
+          livenessProbe:
+            httpGet:
+              path: /livez
+              port: ops
+            periodSeconds: {{ .Values.probes.liveness.periodSeconds }}
+            failureThreshold: {{ .Values.probes.liveness.failureThreshold }}
+          {{- with .Values.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          volumeMounts:
+            {{- include "podium.volumeMounts" . | nindent 12 }}
+      volumes:
+        {{- include "podium.volumes" (dict "root" . "config" (include "podium.fullname" .)) | nindent 8 }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

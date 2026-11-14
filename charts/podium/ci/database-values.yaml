@@ -1,0 +1,25 @@
+# The database mode, from an existing Secret that holds database-url and
+# database-replica-url, with the migration Job and the Deployment's own settings.
+# A render case only: tls.server.secretName is one static Secret, which does not
+# fit a Deployment on a cluster, where each pod's certificate needs its own pod IP
+# as a SAN (see the README, "Forwarding").
+mode: database
+replicas: 3
+secrets:
+  existingSecret: podium-secrets
+migrate:
+  job:
+    enabled: true
+config:
+  cluster:
+    database:
+      lease: 10s
+      max_open_conns: 10
+tls:
+  server:
+    secretName: podium-tls
+    clientCA:
+      secretName: agents-ca
+extraEnvFrom:
+  - secretRef:
+      name: podium-extra-env
