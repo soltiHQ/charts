@@ -1,22 +1,51 @@
 {{/*
+The name of a hook's objects: the release's full name, cut so that the
+component after it keeps the whole within 63 characters, and the component.
+It takes the root context as "root" and the component as "component".
+*/}}
+{{- define "podium.hookName" -}}
+{{- $base := include "podium.fullname" .root | trunc (int (sub 62 (len .component))) | trimSuffix "-" -}}
+{{- printf "%s-%s" $base .component -}}
+{{- end }}
+
+{{/*
+Whether helm uninstall drops the schema: "true" when dropSchema.onUninstall is
+true, "" when it is false or unset. Anything but a boolean stops the render, in
+every mode: a string such as "false", which --set-string or a quoted value
+gives, would otherwise count as true, and drop the database at the uninstall.
+*/}}
+{{- define "podium.dropSchemaOnUninstall" -}}
+{{- $values := default (dict) .Values.dropSchema -}}
+{{- $on := false -}}
+{{- if and (hasKey $values "onUninstall") (not (kindIs "invalid" $values.onUninstall)) -}}
+{{- $on = $values.onUninstall -}}
+{{- end -}}
+{{- if not (kindIs "bool" $on) -}}
+{{- fail (printf "dropSchema.onUninstall must be true or false, unquoted, not %q: a string such as \"false\" would count as true" (toString $on)) -}}
+{{- end -}}
+{{- if $on }}true{{ end -}}
+{{- end }}
+
+{{/*
 A podium command as a Helm hook Job, podium migrate or podium drop-schema, with
 copies of its own of the ConfigMap and, unless secrets.existingSecret names
 one, of the chart's Secret, hooks too, from the same values: a pre-install hook
 runs before the release's ConfigMap and Secret exist, a pre-upgrade one before
 the new ones replace the old, and a post-delete one after the uninstall deleted
-them. The copies and the Job are deleted when the Job succeeds, and stay when it
-fails, for kubectl logs. All three carry the component's label.
+them. All three carry the component's label. When the Job succeeds, Helm
+deletes the three. When it fails, or Helm's --timeout ends first, the Job stays,
+for kubectl logs; Helm 3.18 and older keep the copies too, and Helm 3.19 and
+later delete them.
 
 It takes the root context as "root"; the component, which names the objects,
 the container and the label, as "component"; the hook's events as "hook"; the
-podium command and its arguments as "args"; and the Job's limit, in seconds, as
-"deadline".
+podium command and its arguments as "args"; the Job's limit, in seconds, as
+"deadline"; and its retries as "backoffLimit".
 */}}
 {{- define "podium.hookJob" -}}
 {{- $root := .root -}}
 {{- $v := $root.Values -}}
-{{- $base := include "podium.fullname" $root | trunc (int (sub 62 (len .component))) | trimSuffix "-" -}}
-{{- $name := printf "%s-%s" $base .component -}}
+{{- $name := include "podium.hookName" (dict "root" $root "component" .component) -}}
 {{- $secret := default $name $v.secrets.existingSecret -}}
 apiVersion: v1
 kind: ConfigMap
@@ -49,7 +78,7 @@ metadata:
     helm.sh/hook-weight: "0"
     helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
 spec:
-  backoffLimit: 2
+  backoffLimit: {{ .backoffLimit }}
   activeDeadlineSeconds: {{ .deadline }}
   template:
     metadata:

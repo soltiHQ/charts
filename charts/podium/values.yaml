@@ -136,26 +136,34 @@ migrate:
 # is, and a later install on it finds the state again. podium drops its own
 # tables only: no other table, no schema of the database's, not the database.
 #
-# The hook is stored with the release: set this with helm install or helm
-# upgrade before you uninstall, for example
-#   helm upgrade <release> <chart> --reuse-values --set dropSchema.onUninstall=true
+# onUninstall must be true or false, unquoted: anything else stops the render,
+# as a string "false" would count as true. The hook is stored with the release:
+# set this with helm install or helm upgrade before you uninstall, for example
+#   helm upgrade <release> <chart> --reset-then-reuse-values \
+#     --set dropSchema.onUninstall=true
 # It runs once Helm deleted the release's objects, while their pods may still
 # stop: podium drop-schema waits until no replica runs on the database, then
-# drops the tables in one transaction. A replica that still runs once wait is
-# over, one of another release on the same database say, fails the Job, and
-# nothing is dropped. The Job brings its own copies of the ConfigMap and the
-# Secret, as the release's are gone; with secrets.existingSecret it reads that
-# Secret, which must still exist. helm uninstall --no-hooks skips it. It needs
-# an image with podium drop-schema.
+# drops the tables in one transaction. Only replicas that run protect the
+# database: one still running once wait is over, of another release on the same
+# database say, fails the Job, and nothing is dropped; a deployment that runs no
+# replica at that moment is not seen. The Job makes one attempt (backoffLimit
+# 0). It brings its own copies of the ConfigMap and the Secret, as the release's
+# are gone; everything else the pod refers to must still exist at the
+# uninstall: the Secret of secrets.existingSecret, the TLS Secrets, the objects
+# of extraVolumes and extraEnvFrom, the imagePullSecrets. helm uninstall
+# --no-hooks skips it. It needs an image with podium drop-schema. See the
+# README, "Uninstall".
 dropSchema:
   onUninstall: false
-  # How long podium drop-schema waits for the replicas to stop, a duration: more
-  # than terminationGracePeriodSeconds, and the lease on top for a pod that is
-  # killed, whose lease expires rather than being released.
+  # How long podium drop-schema waits for the replicas to stop, and for a lock
+  # another session holds on a table, a duration of 16 characters at most: more
+  # than terminationGracePeriodSeconds, and the lease on top for a leader that
+  # is killed, whose lease expires rather than being released.
   wait: 2m
-  # The Job's limit: the wait, the 30 seconds podium waits for an unreachable
-  # database, and the drop. helm uninstall waits for the hook up to its
-  # --timeout, 5 minutes by default.
+  # The Job's limit, a whole number of seconds: the wait, the 30 seconds podium
+  # waits for an unreachable database, and the drop. helm uninstall waits for
+  # the hook up to its --timeout, 5 minutes by default: keep that above this
+  # limit, plus the time to schedule the pod and pull the image.
   activeDeadlineSeconds: 240
 
 # Extra environment variables, volumes and mounts for the podium container,

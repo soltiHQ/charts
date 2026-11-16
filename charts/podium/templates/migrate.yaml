@@ -4,5 +4,5 @@ podium migrate as a Helm hook, before the install and before each upgrade: it
 migrates the database the new release will use, from its own copies of the
 ConfigMap and the Secret (see "podium.hookJob").
 */ -}}
-{{ include "podium.hookJob" (dict "root" . "component" "migrate" "hook" "pre-install,pre-upgrade" "args" (list "migrate" "--config" "/etc/podium/podium.yaml") "deadline" .Values.migrate.job.activeDeadlineSeconds) }}
+{{ include "podium.hookJob" (dict "root" . "component" "migrate" "hook" "pre-install,pre-upgrade" "args" (list "migrate" "--config" "/etc/podium/podium.yaml") "deadline" .Values.migrate.job.activeDeadlineSeconds "backoffLimit" 2) }}
 {{- end }}

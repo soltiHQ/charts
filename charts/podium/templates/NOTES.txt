@@ -50,14 +50,14 @@ agents and sessions are gone. For state that survives, use mode: database.
 
 The state lives in your Postgres database, which this chart neither runs nor backs up.
 {{- if .Values.migrate.job.enabled }}
-  The schema is migrated by the Job {{ include "podium.fullname" . }}-migrate, a hook before each install and upgrade.
+  The schema is migrated by the Job {{ include "podium.hookName" (dict "root" . "component" "migrate") }}, a hook before each install and upgrade.
 {{- else }}
   Each replica migrates the schema at start, under a database lock.
 {{- end }}
 {{- if lt (int .Values.replicas) 2 }}
   WARNING: one replica: a restart of it leaves nothing to serve in the meantime.
 {{- end }}
-{{- if .Values.dropSchema.onUninstall }}
+{{- if include "podium.dropSchemaOnUninstall" . }}
   WARNING: helm uninstall drops every table of podium's from the database, and all of its data, once
   the replicas stopped (dropSchema.onUninstall). There is no undo: back the database up first.
 {{- end }}
