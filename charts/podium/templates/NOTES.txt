@@ -57,6 +57,10 @@ The state lives in your Postgres database, which this chart neither runs nor bac
 {{- if lt (int .Values.replicas) 2 }}
   WARNING: one replica: a restart of it leaves nothing to serve in the meantime.
 {{- end }}
+{{- if .Values.dropSchema.onUninstall }}
+  WARNING: helm uninstall drops every table of podium's from the database, and all of its data, once
+  the replicas stopped (dropSchema.onUninstall). There is no undo: back the database up first.
+{{- end }}
 {{- if not .Values.tls.server.secretName }}
   WARNING: without tls.server the replicas forward each other's writes, logins, cookies and tokens
   included, in plaintext.

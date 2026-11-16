@@ -1,7 +1,8 @@
 {{/*
 The chart's Secret, from the secrets.* values, validated. It takes the root
-context as "root", the Secret's name as "name", and "hook" to make it the
-migration Job's copy, which exists before the release's own resources.
+context as "root" and the Secret's name as "name"; for the copy that a hook Job
+brings (see "podium.hookJob"), the hook's events as "hook" and the Job's
+component as "component".
 */}}
 {{- define "podium.secret" -}}
 {{- $v := .root.Values -}}
@@ -30,9 +31,12 @@ metadata:
   name: {{ .name }}
   labels:
     {{- include "podium.labels" .root | nindent 4 }}
+    {{- with .component }}
+    app.kubernetes.io/component: {{ . }}
+    {{- end }}
   {{- if .hook }}
   annotations:
-    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook: {{ .hook }}
     helm.sh/hook-weight: "-10"
     helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
   {{- end }}

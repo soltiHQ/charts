@@ -1,0 +1,108 @@
+{{/*
+A podium command as a Helm hook Job, podium migrate or podium drop-schema, with
+copies of its own of the ConfigMap and, unless secrets.existingSecret names
+one, of the chart's Secret, hooks too, from the same values: a pre-install hook
+runs before the release's ConfigMap and Secret exist, a pre-upgrade one before
+the new ones replace the old, and a post-delete one after the uninstall deleted
+them. The copies and the Job are deleted when the Job succeeds, and stay when it
+fails, for kubectl logs. All three carry the component's label.
+
+It takes the root context as "root"; the component, which names the objects,
+the container and the label, as "component"; the hook's events as "hook"; the
+podium command and its arguments as "args"; and the Job's limit, in seconds, as
+"deadline".
+*/}}
+{{- define "podium.hookJob" -}}
+{{- $root := .root -}}
+{{- $v := $root.Values -}}
+{{- $base := include "podium.fullname" $root | trunc (int (sub 62 (len .component))) | trimSuffix "-" -}}
+{{- $name := printf "%s-%s" $base .component -}}
+{{- $secret := default $name $v.secrets.existingSecret -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "podium.labels" $root | nindent 4 }}
+    app.kubernetes.io/component: {{ .component }}
+  annotations:
+    helm.sh/hook: {{ .hook }}
+    helm.sh/hook-weight: "-10"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+data:
+  podium.yaml: |
+    {{- toYaml (default (dict) $v.config) | nindent 4 }}
+{{- if not $v.secrets.existingSecret }}
+---
+{{ include "podium.secret" (dict "root" $root "name" $name "hook" .hook "component" .component) }}
+{{- end }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "podium.labels" $root | nindent 4 }}
+    app.kubernetes.io/component: {{ .component }}
+  annotations:
+    helm.sh/hook: {{ .hook }}
+    helm.sh/hook-weight: "0"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 2
+  activeDeadlineSeconds: {{ .deadline }}
+  template:
+    metadata:
+      # Not the selector labels: the Services must never list this pod.
+      labels:
+        app.kubernetes.io/instance: {{ $root.Release.Name }}
+        app.kubernetes.io/component: {{ .component }}
+        {{- with $v.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      restartPolicy: Never
+      # The release's ServiceAccount exists neither before the install nor
+      # after the uninstall.
+      automountServiceAccountToken: false
+      {{- with $v.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml $v.podSecurityContext | nindent 8 }}
+      containers:
+        - name: {{ .component }}
+          image: {{ include "podium.image" $root }}
+          imagePullPolicy: {{ $v.image.pullPolicy }}
+          args:
+            {{- toYaml .args | nindent 12 }}
+          env:
+            {{- include "podium.env" (dict "root" $root "secret" $secret) | nindent 12 }}
+          {{- with $v.extraEnvFrom }}
+          envFrom:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with $v.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          securityContext:
+            {{- toYaml $v.securityContext | nindent 12 }}
+          volumeMounts:
+            {{- include "podium.volumeMounts" $root | nindent 12 }}
+      volumes:
+        {{- include "podium.volumes" (dict "root" $root "config" $name) | nindent 8 }}
+      {{- with $v.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $v.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $v.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

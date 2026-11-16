@@ -1,0 +1,16 @@
+{{- if and (eq (include "podium.mode" .) "database") .Values.dropSchema.onUninstall }}
+{{- /*
+podium drop-schema as a Helm hook after helm uninstall: once Helm deleted the
+release's objects, while their pods may still stop, it waits until no replica
+runs on the database, up to dropSchema.wait, then drops every table of podium's,
+and all its data, in one transaction, from its own copies of the ConfigMap and
+the Secret (see "podium.hookJob"). The wait is checked here, at the install or
+the upgrade that stores the hook, as a wrong one would only show at the
+uninstall.
+*/ -}}
+{{- $wait := toString .Values.dropSchema.wait }}
+{{- if not (regexMatch "^([0-9]+(\\.[0-9]+)?(ns|us|ms|s|m|h))+$" $wait) }}
+{{- fail (printf "dropSchema.wait must be a duration such as 2m or 90s, not %q" $wait) }}
+{{- end }}
+{{ include "podium.hookJob" (dict "root" . "component" "drop-schema" "hook" "post-delete" "args" (list "drop-schema" "--yes" "--wait" $wait "--config" "/etc/podium/podium.yaml") "deadline" .Values.dropSchema.activeDeadlineSeconds) }}
+{{- end }}

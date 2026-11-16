@@ -137,6 +137,9 @@ helm install podium oci://ghcr.io/soltihq/charts/podium --version 0.0.2 \
   upgrade. The copies are deleted when the Job succeeds, and stay, with the Job,
   when it fails, for `kubectl logs`. `--no-hooks` skips the Job, and the replicas
   then refuse the old schema.
+- **Uninstall.** `helm uninstall` leaves the database as it is, unless
+  `dropSchema.onUninstall` drops podium's tables with it: see
+  [Uninstall](#uninstall).
 - **Upgrades.** A release's migrations only add, so the version before keeps
   working while a rollout runs. A database whose schema is newer than the image
   stops the replicas that start (a rollback past a migration, or two versions
@@ -234,6 +237,50 @@ state itself does not carry over: the standalone mode it held is gone from
 podium, and `values.yaml` has no `persistence` any more. The `<fullname>-headless`
 Service is gone too.
 
+## Uninstall
+
+`helm uninstall` deletes the release's objects. In the database mode it leaves
+the database as it is by default: podium's tables, and the state in them, stay,
+and a later install on the same database finds them.
+
+With `dropSchema.onUninstall: true` the uninstall drops them too. A Helm hook
+Job runs `podium drop-schema` once Helm has deleted the release's objects: it
+waits until no replica runs on the database, then drops every table of
+podium's, and all of its data, in one transaction. It drops nothing else: no
+other table, no schema of the database's, not the database. Only a backup
+brings the data back. The hook is stored with the release, so set the value
+with `helm install` or `helm upgrade` before the uninstall:
+
+```sh
+helm upgrade podium oci://ghcr.io/soltihq/charts/podium --version 0.0.2 \
+  -n podium --reuse-values --set dropSchema.onUninstall=true
+helm uninstall podium -n podium
+```
+
+- **It waits for the replicas.** A `post-delete` hook can run while the pods
+  still stop, as `helm uninstall` does not always wait for them to be gone. A
+  replica counts as running while it heartbeated within the last three
+  seconds or holds an unexpired lease: one that stops cleanly deletes its row
+  and releases the lease, and one that is killed runs until its lease expires.
+  `dropSchema.wait` (2m) bounds the wait: a replica that still runs then, one of
+  another release on the same database say, fails the Job, and nothing is
+  dropped. A database whose schema is newer than the image fails it too, as the
+  image does not know the newer tables. `dropSchema.activeDeadlineSeconds` (240)
+  bounds the Job, and `helm uninstall` waits for it up to its `--timeout`, 5
+  minutes by default.
+- **It brings its own configuration.** The release's ConfigMap and Secret are
+  gone by then, so the Job brings copies of both, hooks too, from the release's
+  values; with `secrets.existingSecret` it reads that Secret, which must still
+  exist.
+- **A failed Job stays**, with its copies, for `kubectl logs`. `helm uninstall`
+  reports the hook's failure but deletes the release all the same, so a retry is
+  yours: run `podium drop-schema --yes` once the cause is fixed. The copy of the
+  chart's Secret holds the database URL and the other secrets: delete what is
+  left once you are done, `kubectl -n podium delete job,configmap,secret -l
+  app.kubernetes.io/instance=podium,app.kubernetes.io/component=drop-schema`.
+- `helm uninstall --no-hooks` skips it, and the memory mode, which has no
+  database, never runs it. It needs an image with `podium drop-schema`.
+
 ## Values
 
 | Key | Default | |
@@ -245,6 +292,7 @@ Service is gone too.
 | `secrets.jwtSecret`, `secrets.enrollSecret`, `secrets.bootstrapAdminPassword` | `""` | For a Secret the chart makes, when `existingSecret` is empty. |
 | `secrets.databaseUrl`, `secrets.databaseReplicaUrl` | `""` | Database mode: the primary (required with the chart's own Secret) and the optional read endpoint; the keys `database-url` and `database-replica-url` of an existing Secret. |
 | `migrate.job.enabled`, `migrate.job.activeDeadlineSeconds` | `false`, `600` | Database mode: `podium migrate` as a pre-install and pre-upgrade hook. |
+| `dropSchema.onUninstall`, `dropSchema.wait`, `dropSchema.activeDeadlineSeconds` | `false`, `2m`, `240` | Database mode: `podium drop-schema` as a post-delete hook, which drops podium's tables, and all of its data, at `helm uninstall` ([Uninstall](#uninstall)). |
 | `secrets.allowOpenEnrollment` | `false` | Allows running without an enrollment secret. |
 | `config` | log at info as JSON, `shutdown_delay: 5s`, `shutdown_timeout: 15s` | podium's `podium.yaml`. |
 | `tls.server.secretName`, `tls.server.clientCA.secretName` | `""` | TLS on 8080, 8082 and 50051; client certificates for agents. |

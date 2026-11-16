@@ -1,5 +1,6 @@
 # The database mode, from an existing Secret that holds database-url and
-# database-replica-url, with the migration Job and the Deployment's own settings.
+# database-replica-url, with the migration Job, the drop of the schema on
+# uninstall, and the Deployment's own settings.
 # A render case only: tls.server.secretName is one static Secret, which does not
 # fit a Deployment on a cluster, where each pod's certificate needs its own pod IP
 # as a SAN (see the README, "Forwarding").
@@ -10,6 +11,10 @@ secrets:
 migrate:
   job:
     enabled: true
+dropSchema:
+  onUninstall: true
+  wait: 90s
+  activeDeadlineSeconds: 200
 config:
   cluster:
     database:

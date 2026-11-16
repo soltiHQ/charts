@@ -129,6 +129,35 @@ migrate:
     # database before it fails.
     activeDeadlineSeconds: 600
 
+# Database mode: podium drop-schema as a Helm hook after helm uninstall. When
+# on, the uninstall drops every table of podium's from the database, and all of
+# its data with them: users, agents, specs, rollouts, run history. Nothing
+# brings them back but a backup. Off, the uninstall leaves the database as it
+# is, and a later install on it finds the state again. podium drops its own
+# tables only: no other table, no schema of the database's, not the database.
+#
+# The hook is stored with the release: set this with helm install or helm
+# upgrade before you uninstall, for example
+#   helm upgrade <release> <chart> --reuse-values --set dropSchema.onUninstall=true
+# It runs once Helm deleted the release's objects, while their pods may still
+# stop: podium drop-schema waits until no replica runs on the database, then
+# drops the tables in one transaction. A replica that still runs once wait is
+# over, one of another release on the same database say, fails the Job, and
+# nothing is dropped. The Job brings its own copies of the ConfigMap and the
+# Secret, as the release's are gone; with secrets.existingSecret it reads that
+# Secret, which must still exist. helm uninstall --no-hooks skips it. It needs
+# an image with podium drop-schema.
+dropSchema:
+  onUninstall: false
+  # How long podium drop-schema waits for the replicas to stop, a duration: more
+  # than terminationGracePeriodSeconds, and the lease on top for a pod that is
+  # killed, whose lease expires rather than being released.
+  wait: 2m
+  # The Job's limit: the wait, the 30 seconds podium waits for an unreachable
+  # database, and the drop. helm uninstall waits for the hook up to its
+  # --timeout, 5 minutes by default.
+  activeDeadlineSeconds: 240
+
 # Extra environment variables, volumes and mounts for the podium container,
 # for tls.client (podium as a client of the agents) for instance.
 extraEnv: []

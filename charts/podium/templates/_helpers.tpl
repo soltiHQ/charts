@@ -67,13 +67,8 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- $mode -}}
 {{- end }}
 
-{{/* The Secret and the ConfigMap of the migration Job, a hook of its own. */}}
-{{- define "podium.migrateSecretName" -}}
-{{- default (printf "%s-migrate" (include "podium.fullname" .)) .Values.secrets.existingSecret }}
-{{- end }}
-
 {{/*
-The environment of the server and of the migration Job, which loads the same
+The environment of the server and of the hook Jobs, which load the same
 configuration. It takes the root context as "root" and the Secret to read as
 "secret". The database URLs reach the pod only as secretKeyRef, never as a
 literal or from the ConfigMap.
