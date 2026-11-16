@@ -207,12 +207,21 @@ spec:
 
 cert-manager writes the issuer's CA to `ca.crt`, the default of
 `tls.server.caKey`. A certificate of a public CA, from an ACME issuer say, has
-no `ca.crt`: set `tls.server.caKey: ""`, and the replicas verify each other
-against the system roots, for a name of the certificate set as
-`tls.forwardServerName`. A Secret without the key that `tls.server.caKey` names
-keeps the pods from starting. A name that the certificate lacks fails every
-write that reaches a follower with 502, and the follower's log says
-`certificate is valid for …, not …`.
+no `ca.crt`: set `tls.server.caKey: ""` and, as `tls.forwardServerName`, a name
+of the certificate. The replicas then verify each other against the system
+roots, unless `extraEnv` sets `SOLTI_TLS_CLIENT_CA_FILE` for agents of a private
+CA: they fall back to that CA, and every write that reaches a follower fails.
+In that case set `SOLTI_TLS_FORWARD_CA_FILE` to
+`/etc/ssl/certs/ca-certificates.crt`, the system roots of podium's image, in
+`extraEnv` too.
+
+A Secret without the key that `tls.server.caKey` names fails the volume mount
+(`references non-existent secret key`): no pod starts, neither the replicas nor
+the migrate and drop-schema Jobs. With `migrate.job.enabled`, `helm install` and
+`helm upgrade` wait for the migrate hook until their `--timeout` and fail, and
+the running replicas keep the previous revision. A name that the certificate
+lacks fails every write that reaches a follower with 502, and the follower's log
+says `certificate is valid for …, not …`.
 
 ## Web UI
 

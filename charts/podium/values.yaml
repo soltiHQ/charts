@@ -112,8 +112,11 @@ tls:
     # Database mode: the key of that Secret that holds the CA of its
     # certificate, against which a follower checks the leader's certificate
     # when it forwards a write. cert-manager writes ca.crt for a CA or a
-    # self-signed issuer. Set "" for a certificate of a public CA, which the
-    # system roots verify.
+    # self-signed issuer. Set "" for a certificate of a public CA: a follower
+    # then checks the leader against the system roots, or against
+    # SOLTI_TLS_CLIENT_CA_FILE when extraEnv sets it (see the README,
+    # "Replicas over TLS"). The Secret must hold the key named here, or no pod
+    # starts.
     caKey: ca.crt
     # The agents' CA: with it, the agents' listeners (8082, 50051) require a
     # client certificate of that CA. The UI never asks for one.
