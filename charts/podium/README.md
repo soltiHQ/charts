@@ -109,18 +109,19 @@ helm install podium oci://ghcr.io/soltihq/charts/podium --version 0.0.2 \
 - **Forwarding.** A replica that does not lead forwards the writes it gets to the
   leader, logins and tokens included, in plaintext without `tls.server`, with one
   WARN at start; give every replica the same `jwt-secret` and `enroll-secret` (the
-  Secret does). With `tls.server` a follower checks the leader's certificate
-  against the leader's advertise host as written, here the pod IP, so every
-  pod's certificate needs that pod's IP as a SAN, or the follower answers 502.
-  One static Secret cannot name a Deployment's changing pod IPs: use per-pod
-  certificates, from cert-manager's CSI driver for example, mounted through
-  `extraVolumes` and `extraVolumeMounts` and pointed at by `extraEnv`
-  (`SOLTI_TLS_SERVER_CERT_FILE`, `SOLTI_TLS_SERVER_KEY_FILE`; the chart's
-  `tls.server.secretName` mounts one Secret, which does not fit). With
-  `tls.server.clientCA`, every sync a follower forwards also needs a `tls.client`
-  certificate from the agents' CA, through `extraEnv`
+  Secret does). With `tls.server` it forwards over TLS, and checks the leader's
+  certificate for one name, `tls.forwardServerName`, by default the UI Service's
+  `<release>.<namespace>.svc`, against the CA under `tls.server.caKey` of the
+  same Secret, `ca.crt` by default: the replicas share the one certificate,
+  which names that Service whatever their pod IPs, as in
+  [Replicas over TLS](#replicas-over-tls). A follower that cannot verify the
+  leader answers 502 to the write and logs why, at ERROR (`write not forwarded
+  to the leader`). With `tls.server.clientCA`, every sync a follower forwards
+  also needs a `tls.client` certificate from the agents' CA, through `extraEnv`
   (`SOLTI_TLS_CLIENT_CERT_FILE`, `SOLTI_TLS_CLIENT_KEY_FILE`). The chart issues
-  neither certificate. With `config.auth.rotate_refresh: true` a browser's
+  neither certificate. At a rolling update a follower whose forward reaches no
+  leader, as the leader's pod is gone, waits up to 3 seconds for the next leader
+  and sends the write there. With `config.auth.rotate_refresh: true` a browser's
   refresh on a replica that does not lead answers 503, so route browsers to the
   leader (`/leaderz` on the ops port answers 200 on it only); leave rotation off
   otherwise.
@@ -179,6 +180,39 @@ client certificate of the agents' CA as well. podium reads the files at start
 only: restart the pod after a renewal. The chart refuses to render without an
 enrollment secret unless `secrets.allowOpenEnrollment` is `true`, as without
 one any host that reaches the agents' listeners can enroll a new agent ID.
+
+### Replicas over TLS
+
+In the database mode one certificate serves every replica. It names the
+Services, never a pod IP: a follower checks the leader's certificate for
+`tls.forwardServerName`, the UI Service's name by default, against the CA in the
+Secret's `tls.server.caKey`. With cert-manager and a CA issuer:
+
+```yaml
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: podium-tls
+  namespace: podium
+spec:
+  secretName: podium-tls            # tls.server.secretName
+  issuerRef:
+    name: podium-ca
+    kind: Issuer
+  dnsNames:
+    - podium.podium.svc             # tls.forwardServerName's default, <release>.<namespace>.svc
+    - podium-agents.podium.svc      # agents inside the cluster
+    - podium.example.com            # the UI and the agents from outside, as you expose them
+```
+
+cert-manager writes the issuer's CA to `ca.crt`, the default of
+`tls.server.caKey`. A certificate of a public CA, from an ACME issuer say, has
+no `ca.crt`: set `tls.server.caKey: ""`, and the replicas verify each other
+against the system roots, for a name of the certificate set as
+`tls.forwardServerName`. A Secret without the key that `tls.server.caKey` names
+keeps the pods from starting. A name that the certificate lacks fails every
+write that reaches a follower with 502, and the follower's log says
+`certificate is valid for …, not …`.
 
 ## Web UI
 
@@ -323,6 +357,7 @@ chart's values alone, and the chart then falls back on its own defaults for the
 | `secrets.allowOpenEnrollment` | `false` | Allows running without an enrollment secret. |
 | `config` | log at info as JSON, `shutdown_delay: 5s`, `shutdown_timeout: 15s` | podium's `podium.yaml`. |
 | `tls.server.secretName`, `tls.server.clientCA.secretName` | `""` | TLS on 8080, 8082 and 50051; client certificates for agents. |
+| `tls.server.caKey`, `tls.forwardServerName` | `ca.crt`, `""` | Database mode: the CA in that Secret, and the name, the UI Service's by default, against which and for which a follower checks the leader ([Replicas over TLS](#replicas-over-tls)). |
 | `service.type`, `service.port` | `ClusterIP`, `8080` | The UI and the API. |
 | `agents.service.type` | `ClusterIP` | HTTP discovery on 8082, gRPC on 50051. |
 | `ops.service.enabled` | `true` | The ops listener's Service, for scraping and `helm test`. |

@@ -16,8 +16,12 @@ First administrator: user admin.
   Its password is the Secret's {{ .Values.secrets.keys.bootstrapAdminPassword }} key. An empty database needs it:
   without it the replicas stop at start. Change the password after the first login, then remove that key
   and restart the Deployment: podium warns about it at each start while users exist.
-{{- else if or .Values.secrets.bootstrapAdminPassword .Values.secrets.existingSecret }}
-  Its password is the Secret's {{ .Values.secrets.keys.bootstrapAdminPassword }} key, when set.
+{{- else if .Values.secrets.bootstrapAdminPassword }}
+  Its password is the Secret's {{ .Values.secrets.keys.bootstrapAdminPassword }} key.
+{{- else if .Values.secrets.existingSecret }}
+  Its password is the {{ .Values.secrets.keys.bootstrapAdminPassword }} key of the Secret {{ .Values.secrets.existingSecret }}. Without that key podium
+  generated one and logged it once, at WARN, at each start:
+  kubectl -n {{ .Release.Namespace }} logs deploy/{{ include "podium.fullname" . }} | grep "admin password generated"
 {{- else }}
   No bootstrap password was given, so podium generated one and logged it once, at WARN, at each start:
   kubectl -n {{ .Release.Namespace }} logs deploy/{{ include "podium.fullname" . }} | grep "admin password generated"
@@ -36,6 +40,10 @@ Agents reach the {{ include "podium.fullname" . }}-agents Service ({{ .Values.ag
 {{- end }}
 {{- if .Values.tls.server.secretName }}
   The listeners serve TLS with the certificate of the Secret {{ .Values.tls.server.secretName }}{{ if .Values.tls.server.clientCA.secretName }}, and the agents' listeners require a client certificate{{ end }}.
+{{- if eq $mode "database" }}
+  A follower checks the leader's certificate for {{ include "podium.forwardServerName" . }}{{ with include "podium.forwardCAKey" . }}, against the Secret's {{ . }}{{ end }}:
+  the certificate must carry that name, or every write that reaches a follower answers 502.
+{{- end }}
 {{- else }}
   The listeners serve plaintext: the SDK sends an agent's token only over TLS, unless the agent allows
   insecure token transport. Set tls.server.secretName for TLS.

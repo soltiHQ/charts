@@ -68,6 +68,35 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- end }}
 
 {{/*
+The name a follower checks the leader's certificate for, in the database mode
+with tls.server: tls.forwardServerName, or the UI Service's name. A name that is
+not a DNS name stops the render, as podium would refuse it at start.
+*/}}
+{{- define "podium.forwardServerName" -}}
+{{- $tls := default (dict) .Values.tls -}}
+{{- $name := default (printf "%s.%s.svc" (include "podium.fullname" .) .Release.Namespace) (toString (default "" $tls.forwardServerName)) -}}
+{{- if or (gt (len $name) 253) (not (regexMatch "^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$" $name)) -}}
+{{- fail (printf "tls.forwardServerName must be a DNS name, not %q" $name) -}}
+{{- end -}}
+{{- $name -}}
+{{- end }}
+
+{{/*
+The key of the tls.server Secret that holds the CA of its certificate, against
+which a follower checks the leader's certificate in the database mode:
+tls.server.caKey, "" for none, and ca.crt when the key is unset, as in the
+values of a release made before it existed, which --reuse-values keeps.
+*/}}
+{{- define "podium.forwardCAKey" -}}
+{{- $server := default (dict) (default (dict) .Values.tls).server -}}
+{{- if hasKey $server "caKey" -}}
+{{- toString (default "" $server.caKey) -}}
+{{- else -}}
+ca.crt
+{{- end -}}
+{{- end }}
+
+{{/*
 The environment of the server and of the hook Jobs, which load the same
 configuration. It takes the root context as "root" and the Secret to read as
 "secret". The database URLs reach the pod only as secretKeyRef, never as a
@@ -114,6 +143,14 @@ literal or from the ConfigMap.
   value: /etc/podium-tls/server/tls.crt
 - name: SOLTI_TLS_SERVER_KEY_FILE
   value: /etc/podium-tls/server/tls.key
+{{- if eq $mode "database" }}
+- name: SOLTI_TLS_FORWARD_SERVER_NAME
+  value: {{ include "podium.forwardServerName" $root | quote }}
+{{- with include "podium.forwardCAKey" $root }}
+- name: SOLTI_TLS_FORWARD_CA_FILE
+  value: /etc/podium-tls/server/{{ . }}
+{{- end }}
+{{- end }}
 {{- end }}
 {{- if $v.tls.server.clientCA.secretName }}
 - name: SOLTI_TLS_SERVER_CLIENT_CA_FILE
@@ -159,6 +196,11 @@ literal or from the ConfigMap.
         path: tls.crt
       - key: tls.key
         path: tls.key
+{{- $caKey := include "podium.forwardCAKey" .root }}
+{{- if and (eq (include "podium.mode" .root) "database") $caKey (ne $caKey "tls.crt") }}
+      - key: {{ $caKey }}
+        path: {{ $caKey }}
+{{- end }}
 {{- end }}
 {{- if $v.tls.server.clientCA.secretName }}
 - name: tls-client-ca

@@ -109,11 +109,22 @@ tls:
   server:
     # A kubernetes.io/tls Secret (tls.crt, tls.key), cert-manager's for example.
     secretName: ""
+    # Database mode: the key of that Secret that holds the CA of its
+    # certificate, against which a follower checks the leader's certificate
+    # when it forwards a write. cert-manager writes ca.crt for a CA or a
+    # self-signed issuer. Set "" for a certificate of a public CA, which the
+    # system roots verify.
+    caKey: ca.crt
     # The agents' CA: with it, the agents' listeners (8082, 50051) require a
     # client certificate of that CA. The UI never asks for one.
     clientCA:
       secretName: ""
       key: ca.crt
+  # Database mode: the name a follower checks the leader's certificate for when
+  # it forwards a write, so that the certificate of tls.server must carry it as
+  # a DNS name. The replicas share that one certificate, whatever their pod
+  # IPs. Empty: the UI Service's name, <fullname>.<namespace>.svc.
+  forwardServerName: ""
 
 # Database mode: podium migrate as a Helm hook, before the install and before each
 # upgrade. When enabled, the replicas get SOLTI_CLUSTER_DATABASE_MIGRATE=false and
