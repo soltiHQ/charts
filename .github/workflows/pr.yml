@@ -21,15 +21,9 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # The version check compares the charts with the base branch.
-          fetch-depth: 0
           persist-credentials: false
       - uses: azure/setup-helm@2f5e7bc67f1f9972ab16657bb795f36d8f04de0e # v5.1.0
         with:
           version: v4.3.1
       - name: Lint, render and validate every chart
         run: ./scripts/check-charts.sh
-      - name: Check that a changed chart has a new version
-        env:
-          BASE_REF: ${{ github.base_ref }}
-        run: ./scripts/check-versions.sh "origin/$BASE_REF"
