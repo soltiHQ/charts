@@ -1,10 +1,11 @@
 name: Release flow
 
-# A tag <chart>-<version>, as podium-0.0.2, publishes that chart version to
-# oci://ghcr.io/soltihq/charts/<chart>, once: the tag's commit must be on main,
-# its charts/<chart>/Chart.yaml must have that name and that version, the checks
-# of the PR flow must pass on it, and GHCR must not hold the version yet
-# (scripts/publish-chart.sh). A merge to main publishes nothing.
+# A tag <chart>-<version>, as podium-0.1.0 or podium-0.1.0-rc.1, publishes the
+# chart at the tag's commit, with the tag's version, to
+# oci://ghcr.io/soltihq/charts/<chart>, once: the commit must be on main, the
+# checks of the PR flow must pass on it, and GHCR must not hold the version yet
+# (scripts/publish-chart.sh). The version in Chart.yaml plays no part. A merge to
+# main publishes nothing.
 on:
   push:
     tags:

@@ -31,7 +31,7 @@ kubectl -n podium create secret generic podium-secrets \
   --from-literal=enroll-secret="$(openssl rand -hex 32)" \
   --from-literal=bootstrap-admin-password='<12 characters to 72 bytes>'
 
-helm install podium oci://ghcr.io/soltihq/charts/podium --version 0.0.2 \
+helm install podium oci://ghcr.io/soltihq/charts/podium --version <version> \
   -n podium --set secrets.existingSecret=podium-secrets
 ```
 
@@ -69,7 +69,7 @@ kubectl -n podium create secret generic podium-secrets \
   --from-literal=database-url='postgres://podium:<password>@db.example.com:5432/podium?sslmode=verify-full' \
   --from-literal=database-replica-url='postgres://podium_ro:<password>@db-replica.example.com:5432/podium?sslmode=verify-full'
 
-helm install podium oci://ghcr.io/soltihq/charts/podium --version 0.0.2 \
+helm install podium oci://ghcr.io/soltihq/charts/podium --version <version> \
   -n podium --set mode=database --set secrets.existingSecret=podium-secrets
 ```
 
@@ -431,9 +431,10 @@ stops (`maxSurge: 1`, `maxUnavailable: 0`). A newer podium may write state an
 older one cannot read: take a backup before you upgrade, as there is no
 downgrade.
 
-### From chart 0.0.1
+### From the StatefulSet chart
 
-Chart 0.0.1 ran a StatefulSet with a PersistentVolumeClaim `data-<fullname>-0`.
+The earlier chart, `podium-chart`, ran a StatefulSet with a PersistentVolumeClaim
+`data-<fullname>-0`.
 This chart has a Deployment instead, so an upgrade replaces the StatefulSet and
 leaves its claim in place, unused: delete it yourself
 (`kubectl delete pvc data-podium-0`) once you no longer need the state in it. The
@@ -459,7 +460,7 @@ with the release, so set the value with `helm install` or `helm upgrade` before
 the uninstall:
 
 ```sh
-helm upgrade podium oci://ghcr.io/soltihq/charts/podium --version 0.0.2 \
+helm upgrade podium oci://ghcr.io/soltihq/charts/podium --version <version> \
   -n podium --reset-then-reuse-values --set dropSchema.onUninstall=true
 helm uninstall podium -n podium
 ```

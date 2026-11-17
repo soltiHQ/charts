@@ -2,7 +2,9 @@ apiVersion: v2
 name: podium
 description: podium, the solti control plane, as one node with its state in memory, or as replicas that share a Postgres database
 type: application
-version: 0.0.2
+# The release sets the version: a tag podium-<version> publishes the chart with
+# it (scripts/publish-chart.sh). This one is for local renders only.
+version: 0.0.0
 appVersion: "v0.0.1-rc.2"
 kubeVersion: ">=1.25.0-0"
 home: https://github.com/soltiHQ/podium

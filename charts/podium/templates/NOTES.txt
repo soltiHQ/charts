@@ -86,9 +86,9 @@ The state lives in your Postgres database, which this chart neither runs nor bac
 {{- end }}
 {{- end }}
 
-Upgrading from chart 0.0.1: it ran a StatefulSet with a PersistentVolumeClaim. This chart replaces the
-StatefulSet with a Deployment and leaves the claim in place, unused: once you no longer need the state
-in it, delete it yourself (kubectl -n {{ .Release.Namespace }} delete pvc data-{{ include "podium.fullname" . }}-0).
+Upgrading from the earlier StatefulSet chart: it ran a StatefulSet with a PersistentVolumeClaim. This
+chart replaces the StatefulSet with a Deployment and leaves the claim in place, unused: once you no
+longer need the state in it, delete it yourself (kubectl -n {{ .Release.Namespace }} delete pvc data-{{ include "podium.fullname" . }}-0).
 
 Health, build and metrics (no authentication; keep internal):
   kubectl -n {{ .Release.Namespace }} port-forward deploy/{{ include "podium.fullname" . }} 8081:8081
