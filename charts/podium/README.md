@@ -152,11 +152,14 @@ helm install podium oci://ghcr.io/soltihq/charts/podium --version <version> \
 - **Uninstall.** `helm uninstall` leaves the database as it is, unless
   `dropSchema.onUninstall` drops podium's tables with it: see
   [Uninstall](#uninstall).
-- **Upgrades.** A release's migrations only add, so the version before keeps
-  working while a rollout runs. A database whose schema is newer than the image
-  stops the replicas that start (a rollback past a migration, or two versions
-  in a rollout). There is no downgrade: take a database backup before you upgrade.
-  The chart neither runs nor backs up the database.
+- **Upgrades.** A release's migrations only add, so a replica of the version
+  before that already runs keeps working while a rollout runs. A database whose
+  schema is newer than the image stops the replicas that start (a rollback past a
+  migration, or an old replica that restarts or is rescheduled in the middle of a
+  rollout). There is no downgrade: take a database backup before you upgrade.
+  The chart neither runs nor backs up the database. A podium with workload types
+  adds one more thing to know about a rollout: see
+  [Upgrading to workload types](#upgrading-to-workload-types).
 - **The password.** Postgres keeps the sessions it authenticated before an
   `ALTER ROLE … PASSWORD`, and podium reads the URLs at start and sets no
   connection lifetime. To rotate: update the Secret's URL keys, then
@@ -430,6 +433,38 @@ new one; the database mode's starts a new replica, ready, before an old one
 stops (`maxSurge: 1`, `maxUnavailable: 0`). A newer podium may write state an
 older one cannot read: take a backup before you upgrade, as there is no
 downgrade.
+
+### Upgrading to workload types
+
+The podium release that replaces the built-in task kinds with workload types,
+declared by the agents (`workload` in a spec, a catalog at
+`/api/v1/workload-types`), changes what an upgrade has to respect. The chart
+needs no value for it: it reads podium's own migrations, so the new table is
+migrated by each `migrate.mode` as before.
+
+- **Schema.** Database mode: migration `0002` adds the table
+  `podium_workload_schemas` and nothing else. With `migrate.mode: external`,
+  apply `0002` (from `podium schema export --dir DIR` of the new image) before
+  the release; the role that podium connects as needs the same row privileges on
+  the new table as on the others, and the read role `SELECT`, which the default
+  privileges of [the read role](#database-mode) already give. The schema is then
+  at version 2: an image of the earlier release refuses to start on it, so a
+  rollback is a restore of the backup you took.
+- **No specs during the rollout.** A replica of the earlier release drops a
+  spec's `workload` fields: a spec written or edited on one, or replayed from
+  the log, loses its workload. In database mode a rolling update runs old and
+  new replicas side by side (`maxSurge: 1`, `maxUnavailable: 0`), and the chart
+  cannot tell them apart: write no spec, in the UI or the API, until
+  `kubectl rollout status deployment/<release>` says every replica runs the new
+  image. The memory mode's `Recreate` has no such window.
+- **Agents.** Agents on the current SDK do not accept the tasks this podium
+  sends, and send no schemas; deploy no spec to them before they run the SDK
+  that declares workload types. Agent listeners and ports are unchanged.
+- **Nothing to migrate.** There are no specs of the earlier shape to carry over.
+
+The image tag is the chart's `appVersion`: `v0.0.1-rc.2` does not contain
+workload types. Until the chart's `appVersion` names the release that does, set
+`image.tag` (or `image.digest`) to it.
 
 ### From the StatefulSet chart
 
