@@ -1,0 +1,32 @@
+{{- /*
+The PodDisruptionBudget of the replicas, in the database mode with two or more:
+a drain evicts them one by one, waiting until the evicted replica's successor
+is ready, rather than all at once. minAvailable, when set, wins over
+maxUnavailable; neither stops the render.
+*/ -}}
+{{- $pdb := default (dict) .Values.podDisruptionBudget }}
+{{- if and (eq (include "podium.mode" .) "database") $pdb.enabled (ge (int .Values.replicas) 2) }}
+{{- $min := $pdb.minAvailable }}
+{{- $max := $pdb.maxUnavailable }}
+{{- if and (kindIs "invalid" $min) (kindIs "invalid" $max) }}
+{{- fail "podDisruptionBudget needs minAvailable or maxUnavailable" }}
+{{- end }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "podium.fullname" . }}
+  labels:
+    {{- include "podium.labels" . | nindent 4 }}
+spec:
+  {{- if not (kindIs "invalid" $min) }}
+  minAvailable: {{ $min | toJson }}
+  {{- else }}
+  maxUnavailable: {{ $max | toJson }}
+  {{- end }}
+  {{- with $pdb.unhealthyPodEvictionPolicy }}
+  unhealthyPodEvictionPolicy: {{ . }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "podium.selectorLabels" . | nindent 6 }}
+{{- end }}

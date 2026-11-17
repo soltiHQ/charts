@@ -215,6 +215,17 @@ hooks:
   # the Job completes. The Jobs take no container beside podium, which would
   # keep them from completing.
   initContainers: null
+  # Their pods' annotations, labels, nodeSelector, affinity and tolerations:
+  # null, the replicas' own; set, even empty, instead of them. An anti-affinity
+  # rule against the replicas, say, keeps a Job off every node a replica runs
+  # on, and from any node at all when the replicas cover them: set affinity
+  # here. The Jobs take the replicas' priorityClassName, hostAliases, dnsPolicy
+  # and dnsConfig as they are.
+  podAnnotations: null
+  podLabels: null
+  nodeSelector: null
+  affinity: null
+  tolerations: null
   # The ServiceAccount they run as, one that exists before the install and
   # after the uninstall, as the release's own does not. Empty: with
   # serviceAccount.create false, serviceAccount.name; otherwise the namespace's
@@ -332,6 +343,43 @@ priorityClassName: ""
 nodeSelector: {}
 tolerations: []
 affinity: {}
+
+# Spreads the replicas over zones or nodes, as Kubernetes takes them; a
+# constraint without labelSelector gets the Deployment's selector labels. For
+# example, one replica per node:
+#   - maxSkew: 1
+#     topologyKey: kubernetes.io/hostname
+#     whenUnsatisfiable: DoNotSchedule
+topologySpreadConstraints: []
+
+# Database mode: the replicas' PodDisruptionBudget, with two or more, so that a
+# drain evicts one at a time, each once its successor is ready. minAvailable,
+# when set, wins over maxUnavailable; either a number or a percentage.
+# unhealthyPodEvictionPolicy: AlwaysAllow lets a drain evict a replica that is
+# not ready, which the budget otherwise counts as one already gone.
+podDisruptionBudget:
+  enabled: true
+  maxUnavailable: 1
+  minAvailable: null
+  unhealthyPodEvictionPolicy: ""
+
+# The podium container's lifecycle hooks. podium already waits
+# server.shutdown_delay before it stops serving, for the endpoints to drop the
+# pod: a preStop hook adds to that, within terminationGracePeriodSeconds.
+lifecycle: {}
+
+# Name resolution of the pods, the replicas' and the hook Jobs': entries of
+# /etc/hosts, the DNS policy and the DNS settings, as Kubernetes takes them.
+hostAliases: []
+dnsPolicy: ""
+dnsConfig: {}
+
+# Manifests of your own, released with the chart's: each a map or a string,
+# rendered as a template of the release, so that {{ .Release.Name }} and the
+# like work in them. They are created with the release's objects, after the
+# pre-install hooks: an object a hook Job needs, a ServiceAccount of
+# hooks.serviceAccountName say, must exist before the install.
+extraObjects: []
 
 # helm test: checks /readyz on the ops Service.
 tests:

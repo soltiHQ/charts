@@ -290,6 +290,15 @@ which exists neither before the install nor after the uninstall. The Jobs take
 no `extraContainers`: a container beside podium would keep them from
 completing.
 
+The hook Jobs' pods take the replicas' annotations, labels, `nodeSelector`,
+`affinity` and `tolerations`, and `hooks.podAnnotations`, `hooks.podLabels`,
+`hooks.nodeSelector`, `hooks.affinity` and `hooks.tolerations` replace them
+when set, even empty: an anti-affinity rule against the replicas keeps a Job
+off every node a replica runs on, and from any node at all when the replicas
+cover them, so set `hooks.affinity: {}` with one; and a mesh's injection
+annotation would give a Job a proxy that keeps it from completing. They take
+`priorityClassName`, `hostAliases`, `dnsPolicy` and `dnsConfig` as they are.
+
 The hook Jobs run under `hooks.serviceAccountName`; when it is empty, under
 `serviceAccount.name` with `serviceAccount.create: false`, a ServiceAccount of
 yours; otherwise under the namespace's `default`, as the release's own
@@ -376,6 +385,38 @@ initContainers:
   proxy.
 - `--private-ip` reaches the instance by its private IP; leave it out for a
   public one. `ci/database-cloudsql-values.yaml` renders this setup.
+
+## Scheduling and disruptions
+
+- **Spread.** `topologySpreadConstraints` spreads the replicas over zones or
+  nodes; a constraint without `labelSelector` gets the Deployment's selector
+  labels. One replica per node:
+
+  ```yaml
+  topologySpreadConstraints:
+    - maxSkew: 1
+      topologyKey: kubernetes.io/hostname
+      whenUnsatisfiable: DoNotSchedule
+  ```
+
+- **Disruptions.** In the database mode with two replicas or more the chart
+  makes a PodDisruptionBudget, `maxUnavailable: 1` by default, so that a node
+  drain or an upgrade of the node pool evicts one replica at a time, each once
+  its successor is ready. `podDisruptionBudget.minAvailable`, when set, wins
+  over `maxUnavailable`; `unhealthyPodEvictionPolicy: AlwaysAllow` lets a drain
+  evict a replica that is not ready, which the budget otherwise counts as one
+  already gone; `podDisruptionBudget.enabled: false` makes none. The memory
+  mode, with its one replica, has none.
+- **The rest of the pod.** `lifecycle` sets the podium container's hooks:
+  podium already waits `server.shutdown_delay` before it stops serving, and a
+  `preStop` hook adds to that, within `terminationGracePeriodSeconds`.
+  `hostAliases`, `dnsPolicy` and `dnsConfig` set the name resolution of the
+  replicas and of the hook Jobs.
+- **Objects of your own.** `extraObjects` releases manifests with the chart's:
+  each a map or a string, rendered as a template of the release, so that
+  `{{ .Release.Name }}` and `{{ include "podium.selectorLabels" . }}` work in
+  them. They are created with the release's objects, after the pre-install
+  hooks: an object a hook Job needs must exist before the install.
 
 ## Back up, upgrade
 
@@ -496,5 +537,11 @@ migrates it.
 | `extraEnv`, `extraEnvFrom`, `extraVolumes`, `extraVolumeMounts` | `[]` | `tls.client` files, for instance. |
 | `initContainers`, `extraContainers` | `[]` | Containers before and beside podium; an init container with `restartPolicy: Always` is a native sidecar, Kubernetes 1.29 or later ([Containers beside podium](#containers-beside-podium)). |
 | `hooks.initContainers`, `hooks.serviceAccountName` | `null`, `""` | The hook Jobs' init containers, `initContainers` when null, and their ServiceAccount, `serviceAccount.name` with `serviceAccount.create: false` when empty, the namespace's `default` otherwise. |
+| `hooks.podAnnotations`, `hooks.podLabels`, `hooks.nodeSelector`, `hooks.affinity`, `hooks.tolerations` | `null` | The hook Jobs' pods' own, instead of the replicas' when set, even empty. |
+| `topologySpreadConstraints` | `[]` | Spreads the replicas; a constraint without `labelSelector` gets the selector labels. |
+| `podDisruptionBudget.enabled`, `.maxUnavailable`, `.minAvailable`, `.unhealthyPodEvictionPolicy` | `true`, `1`, `null`, `""` | Database mode, two replicas or more: the replicas' PodDisruptionBudget; `minAvailable` wins when set. |
+| `lifecycle` | `{}` | The podium container's lifecycle hooks. |
+| `hostAliases`, `dnsPolicy`, `dnsConfig` | `[]`, `""`, `{}` | Name resolution of the replicas and the hook Jobs. |
+| `extraObjects` | `[]` | Manifests of your own, rendered as templates of the release. |
 | `resources` | requests 100m and 128Mi, limit 512Mi | |
 | `terminationGracePeriodSeconds` | `60` | Covers the delay, the timeout and the store's close. |

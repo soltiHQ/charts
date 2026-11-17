@@ -81,6 +81,47 @@ the field and run it as an init container that never ends.
 {{- end }}
 
 {{/*
+A setting of the hook Jobs' pods, as YAML, empty for none: hooks.<key> when it
+is set and not null, and otherwise the replicas' own, <key>. It takes the root
+context as "root" and the key as "key".
+*/}}
+{{- define "podium.hookPodValue" -}}
+{{- $v := .root.Values -}}
+{{- $hooks := default (dict) $v.hooks -}}
+{{- $value := index $v .key -}}
+{{- if and (hasKey $hooks .key) (not (kindIs "invalid" (index $hooks .key))) -}}
+{{- $value = index $hooks .key -}}
+{{- end -}}
+{{- if $value -}}
+{{- toYaml $value -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+The topologySpreadConstraints of the replicas, as YAML, empty for none: each as
+given, with the Deployment's selector labels as its labelSelector when it has
+none, as a constraint without one counts no pod. A value that is not a list
+stops the render.
+*/}}
+{{- define "podium.topologySpreadConstraints" -}}
+{{- $value := .Values.topologySpreadConstraints -}}
+{{- if not (or (kindIs "invalid" $value) (kindIs "slice" $value)) -}}
+{{- fail (printf "topologySpreadConstraints must be a list, not a %s" (kindOf $value)) -}}
+{{- end -}}
+{{- $constraints := list -}}
+{{- range $value -}}
+{{- $c := deepCopy . -}}
+{{- if not (hasKey $c "labelSelector") -}}
+{{- $_ := set $c "labelSelector" (dict "matchLabels" (include "podium.selectorLabels" $ | fromYaml)) -}}
+{{- end -}}
+{{- $constraints = append $constraints $c -}}
+{{- end -}}
+{{- if $constraints -}}
+{{- toYaml $constraints -}}
+{{- end -}}
+{{- end }}
+
+{{/*
 The init containers of the hook Jobs, as podium.containerList renders them:
 hooks.initContainers when it is a list, even an empty one, and otherwise those
 of initContainers. A native sidecar among them, a proxy to the database say,

@@ -1,0 +1,13 @@
+{{- /*
+extraObjects: manifests of the deployment's own, released with the chart's,
+each a map or a string, rendered as a template of the release (tpl), so that
+{{ .Release.Name }} and the chart's helpers work in them.
+*/ -}}
+{{- $objects := .Values.extraObjects }}
+{{- if not (or (kindIs "invalid" $objects) (kindIs "slice" $objects)) }}
+{{- fail (printf "extraObjects must be a list of manifests, not a %s" (kindOf $objects)) }}
+{{- end }}
+{{- range $objects }}
+---
+{{ if kindIs "string" . }}{{ tpl . $ }}{{ else }}{{ tpl (toYaml .) $ }}{{ end }}
+{{- end }}

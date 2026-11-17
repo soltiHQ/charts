@@ -86,9 +86,13 @@ spec:
       labels:
         app.kubernetes.io/instance: {{ $root.Release.Name }}
         app.kubernetes.io/component: {{ .component }}
-        {{- with $v.podLabels }}
-        {{- toYaml . | nindent 8 }}
+        {{- with include "podium.hookPodValue" (dict "root" $root "key" "podLabels") }}
+        {{- . | nindent 8 }}
         {{- end }}
+      {{- with include "podium.hookPodValue" (dict "root" $root "key" "podAnnotations") }}
+      annotations:
+        {{- . | nindent 8 }}
+      {{- end }}
     spec:
       restartPolicy: Never
       {{- with include "podium.hookServiceAccountName" $root }}
@@ -97,6 +101,20 @@ spec:
       automountServiceAccountToken: {{ $v.serviceAccount.automountServiceAccountToken }}
       {{- with $v.imagePullSecrets }}
       imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $v.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
+      {{- with $v.hostAliases }}
+      hostAliases:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $v.dnsPolicy }}
+      dnsPolicy: {{ . }}
+      {{- end }}
+      {{- with $v.dnsConfig }}
+      dnsConfig:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       securityContext:
@@ -127,16 +145,16 @@ spec:
             {{- include "podium.volumeMounts" $root | nindent 12 }}
       volumes:
         {{- include "podium.volumes" (dict "root" $root "config" $name) | nindent 8 }}
-      {{- with $v.nodeSelector }}
+      {{- with include "podium.hookPodValue" (dict "root" $root "key" "nodeSelector") }}
       nodeSelector:
-        {{- toYaml . | nindent 8 }}
+        {{- . | nindent 8 }}
       {{- end }}
-      {{- with $v.affinity }}
+      {{- with include "podium.hookPodValue" (dict "root" $root "key" "affinity") }}
       affinity:
-        {{- toYaml . | nindent 8 }}
+        {{- . | nindent 8 }}
       {{- end }}
-      {{- with $v.tolerations }}
+      {{- with include "podium.hookPodValue" (dict "root" $root "key" "tolerations") }}
       tolerations:
-        {{- toYaml . | nindent 8 }}
+        {{- . | nindent 8 }}
       {{- end }}
 {{- end }}

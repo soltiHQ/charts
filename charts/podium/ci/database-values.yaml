@@ -1,7 +1,9 @@
 # The database mode, from an existing Secret that holds database-url and
 # database-replica-url, with the migration Job, the drop of the schema on
-# uninstall, the Deployment's own settings, and TLS between the replicas with
-# the defaults of tls.server.caKey and tls.forwardServerName.
+# uninstall, the Deployment's own settings (spread, disruption budget, lifecycle,
+# name resolution, the hook Jobs' own annotations and affinity, objects of its
+# own), and TLS between the replicas with the defaults of tls.server.caKey and
+# tls.forwardServerName.
 mode: database
 replicas: 3
 secrets:
@@ -25,3 +27,56 @@ tls:
 extraEnvFrom:
   - secretRef:
       name: podium-extra-env
+podAnnotations:
+  sidecar.istio.io/inject: "true"
+affinity:
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          topologyKey: kubernetes.io/hostname
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: podium
+hooks:
+  podAnnotations:
+    sidecar.istio.io/inject: "false"
+  affinity: {}
+topologySpreadConstraints:
+  - maxSkew: 1
+    topologyKey: topology.kubernetes.io/zone
+    whenUnsatisfiable: ScheduleAnyway
+podDisruptionBudget:
+  unhealthyPodEvictionPolicy: AlwaysAllow
+lifecycle:
+  preStop:
+    sleep:
+      seconds: 2
+hostAliases:
+  - ip: 10.0.0.10
+    hostnames:
+      - db-primary.internal
+dnsConfig:
+  options:
+    - name: ndots
+      value: "2"
+extraObjects:
+  - apiVersion: v1
+    kind: ConfigMap
+    metadata:
+      name: '{{ .Release.Name }}-extra'
+    data:
+      note: an object of the deployment's own
+  - |
+    apiVersion: networking.k8s.io/v1
+    kind: NetworkPolicy
+    metadata:
+      name: {{ .Release.Name }}-ingress
+    spec:
+      podSelector:
+        matchLabels:
+          {{- include "podium.selectorLabels" . | nindent 10 }}
+      policyTypes:
+        - Ingress
+      ingress:
+        - {}
