@@ -194,6 +194,33 @@ extraEnvFrom: []
 extraVolumes: []
 extraVolumeMounts: []
 
+# Containers for the pods of the Deployment besides podium, as Kubernetes takes
+# them. initContainers run before podium starts. One with restartPolicy: Always
+# is a native sidecar (Kubernetes 1.29 and later; the chart refuses one on an
+# older cluster): it starts before podium, which waits for its startupProbe,
+# runs beside it, and stops after it, so podium keeps it through its shutdown:
+# the form for a proxy to the database, as Google's cloud-sql-proxy.
+# extraContainers run beside podium, started and stopped with it. The hook Jobs
+# take initContainers too, unless hooks.initContainers says otherwise. See the
+# README, "Containers beside podium".
+initContainers: []
+extraContainers: []
+
+# The hook Jobs: podium migrate before the install and each upgrade
+# (migrate.mode job), podium drop-schema after the uninstall
+# (dropSchema.onUninstall).
+hooks:
+  # Their init containers: null, those of initContainers; a list, even an empty
+  # one, instead of them. A native sidecar stops once podium's command ends, and
+  # the Job completes. The Jobs take no container beside podium, which would
+  # keep them from completing.
+  initContainers: null
+  # The ServiceAccount they run as, one that exists before the install and
+  # after the uninstall, as the release's own does not. Empty: with
+  # serviceAccount.create false, serviceAccount.name; otherwise the namespace's
+  # default.
+  serviceAccountName: ""
+
 # The web UI and the REST API (8080).
 service:
   type: ClusterIP

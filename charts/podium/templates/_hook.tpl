@@ -91,15 +91,20 @@ spec:
         {{- end }}
     spec:
       restartPolicy: Never
-      # The release's ServiceAccount exists neither before the install nor
-      # after the uninstall.
-      automountServiceAccountToken: false
+      {{- with include "podium.hookServiceAccountName" $root }}
+      serviceAccountName: {{ . }}
+      {{- end }}
+      automountServiceAccountToken: {{ $v.serviceAccount.automountServiceAccountToken }}
       {{- with $v.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       securityContext:
         {{- toYaml $v.podSecurityContext | nindent 8 }}
+      {{- with include "podium.hookInitContainers" $root }}
+      initContainers:
+        {{- . | nindent 8 }}
+      {{- end }}
       containers:
         - name: {{ .component }}
           image: {{ include "podium.image" $root }}

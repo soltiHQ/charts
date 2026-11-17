@@ -54,6 +54,10 @@ spec:
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
       terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
+      {{- with include "podium.containerList" (dict "key" "initContainers" "value" .Values.initContainers "kubeVersion" .Capabilities.KubeVersion.Version) }}
+      initContainers:
+        {{- . | nindent 8 }}
+      {{- end }}
       containers:
         - name: podium
           image: {{ include "podium.image" . }}
@@ -121,6 +125,9 @@ spec:
             {{- toYaml .Values.securityContext | nindent 12 }}
           volumeMounts:
             {{- include "podium.volumeMounts" . | nindent 12 }}
+        {{- with include "podium.containerList" (dict "key" "extraContainers" "value" .Values.extraContainers "kubeVersion" .Capabilities.KubeVersion.Version) }}
+        {{- . | nindent 8 }}
+        {{- end }}
       volumes:
         {{- include "podium.volumes" (dict "root" . "config" (include "podium.fullname" .)) | nindent 8 }}
       {{- with .Values.nodeSelector }}

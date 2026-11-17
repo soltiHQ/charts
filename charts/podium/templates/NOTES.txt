@@ -74,6 +74,12 @@ The state lives in your Postgres database, which this chart neither runs nor bac
   WARNING: helm uninstall drops every table of podium's from the database, and all of its data, once
   the replicas stopped (dropSchema.onUninstall). There is no undo: back the database up first.
 {{- end }}
+{{- if and (or (eq $migrate "job") (include "podium.dropSchemaOnUninstall" .)) .Values.serviceAccount.annotations (not (include "podium.hookServiceAccountName" .)) }}
+  WARNING: the hook Jobs run under the namespace's default ServiceAccount, without the annotations of
+  serviceAccount, a Workload Identity binding say: the release's own exists neither before the install
+  nor after the uninstall. Name one of yours in hooks.serviceAccountName, or set serviceAccount.create
+  false and serviceAccount.name, which the Jobs then take too.
+{{- end }}
 {{- if not .Values.tls.server.secretName }}
   WARNING: without tls.server the replicas forward each other's writes, logins, cookies and tokens
   included, in plaintext.

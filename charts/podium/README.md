@@ -269,6 +269,114 @@ and the advertise address as well, and the image sets `SOLTI_OPS_ADDR=:8081`. Th
 8081, 8082 and 50051. See
 [every setting](https://github.com/soltiHQ/podium/blob/main/internal/config/README.md#every-setting).
 
+## Containers beside podium
+
+`initContainers` and `extraContainers` add containers to the pods of the
+Deployment, as Kubernetes takes them, in both modes. An init container with
+`restartPolicy: Always` is a native sidecar, which needs Kubernetes 1.29 or
+later (the chart refuses one on an older cluster, which would run it as an init
+container that never ends): it starts before podium, which waits for its
+`startupProbe`, runs beside it, and stops after it. That is the form for a proxy
+to the database, as podium keeps its connections through its shutdown, the
+release of the lease included. A container of `extraContainers` runs beside
+podium, started and stopped with it.
+
+The hook Jobs, `migrate` (`migrate.mode: job`) and `drop-schema`
+(`dropSchema.onUninstall`), take `initContainers` too, so that a proxy serves
+them as it serves the replicas: a native sidecar stops once podium's command
+ends, and the Job completes. `hooks.initContainers` replaces them for the Jobs
+(`[]` for none), for an init container that needs an object of the release,
+which exists neither before the install nor after the uninstall. The Jobs take
+no `extraContainers`: a container beside podium would keep them from
+completing.
+
+The hook Jobs run under `hooks.serviceAccountName`; when it is empty, under
+`serviceAccount.name` with `serviceAccount.create: false`, a ServiceAccount of
+yours; otherwise under the namespace's `default`, as the release's own
+ServiceAccount exists neither before the install nor after the uninstall. Their
+pods mount its token as the replicas do, by
+`serviceAccount.automountServiceAccountToken`.
+
+### Cloud SQL on GKE
+
+The [Cloud SQL Auth Proxy](https://github.com/GoogleCloudPlatform/cloud-sql-proxy)
+as a native sidecar of the replicas and of the hook Jobs, with Workload
+Identity: a Kubernetes ServiceAccount of yours, bound to a Google service
+account with the Cloud SQL Client role, which the replicas and the Jobs run
+under.
+
+```yaml
+serviceAccount:
+  create: false
+  name: podium
+initContainers:
+  - name: cloud-sql-proxy
+    image: gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.28.0
+    restartPolicy: Always
+    args:
+      - --private-ip
+      - <project>:<region>:<instance>
+    env:
+      - name: CSQL_PROXY_PORT
+        value: "5432"
+      - name: CSQL_PROXY_HEALTH_CHECK
+        value: "true"
+      - name: CSQL_PROXY_HTTP_PORT
+        value: "9801"
+      - name: CSQL_PROXY_HTTP_ADDRESS
+        value: 0.0.0.0
+      - name: CSQL_PROXY_EXIT_ZERO_ON_SIGTERM
+        value: "true"
+      - name: CSQL_PROXY_STRUCTURED_LOGS
+        value: "true"
+    startupProbe:
+      httpGet:
+        path: /startup
+        port: 9801
+      periodSeconds: 1
+      failureThreshold: 60
+    livenessProbe:
+      httpGet:
+        path: /liveness
+        port: 9801
+      periodSeconds: 10
+    securityContext:
+      runAsNonRoot: true
+      readOnlyRootFilesystem: true
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop:
+          - ALL
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+```
+
+- **The URL.** `database-url` names the proxy:
+  `postgres://podium:<password>@127.0.0.1:5432/podium?sslmode=disable`. The
+  proxy encrypts the connection to Cloud SQL and authorizes it with the
+  service account. It is a TCP proxy, no pooler, so podium's `LISTEN`, which
+  carries the events between the replicas, works through it.
+- **No readiness probe on the proxy.** podium's `/readyz` already answers 503
+  while the primary does not answer, through the proxy or not, and recovers
+  with it.
+- **The replicas' `podSecurityContext`** (user and group 65532, non-root)
+  applies to the proxy too, whose image runs as a non-root user.
+- **Workload Identity** goes through the GKE metadata server, which fetches the
+  ServiceAccount's token itself, so the chart's default
+  `automountServiceAccountToken: false` should not stand in its way; if your
+  cluster needs the token in the pod, set it to `true`, for the replicas and
+  the Jobs alike. With `serviceAccount.create: true` instead, the annotations of
+  `serviceAccount` reach the replicas, but the hook Jobs run under the
+  namespace's `default`, and the chart warns about it: name the bound
+  ServiceAccount in `hooks.serviceAccountName`.
+- **Without the Jobs.** With `migrate.mode: start` or `external` and no
+  `dropSchema.onUninstall` there is no hook Job: the replicas alone need the
+  proxy.
+- `--private-ip` reaches the instance by its private IP; leave it out for a
+  public one. `ci/database-cloudsql-values.yaml` renders this setup.
+
 ## Back up, upgrade
 
 The memory mode has nothing to back up: the state is lost with the pod. In the
@@ -386,5 +494,7 @@ migrates it.
 | `ingress.enabled` | `false` | The UI's Ingress. |
 | `metrics.serviceMonitor.enabled` | `false` | A ServiceMonitor on the ops Service. |
 | `extraEnv`, `extraEnvFrom`, `extraVolumes`, `extraVolumeMounts` | `[]` | `tls.client` files, for instance. |
+| `initContainers`, `extraContainers` | `[]` | Containers before and beside podium; an init container with `restartPolicy: Always` is a native sidecar, Kubernetes 1.29 or later ([Containers beside podium](#containers-beside-podium)). |
+| `hooks.initContainers`, `hooks.serviceAccountName` | `null`, `""` | The hook Jobs' init containers, `initContainers` when null, and their ServiceAccount, `serviceAccount.name` with `serviceAccount.create: false` when empty, the namespace's `default` otherwise. |
 | `resources` | requests 100m and 128Mi, limit 512Mi | |
 | `terminationGracePeriodSeconds` | `60` | Covers the delay, the timeout and the store's close. |

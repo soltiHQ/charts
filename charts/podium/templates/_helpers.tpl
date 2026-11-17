@@ -41,6 +41,64 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- end }}
 {{- end }}
 
+{{/*
+The ServiceAccount the hook Jobs run as: hooks.serviceAccountName, or, with
+serviceAccount.create false, the one the replicas run as, which exists apart
+from the release; empty otherwise, for the namespace's default. The release's
+own ServiceAccount exists neither when the pre-install Job runs, before the
+release's objects, nor when the post-delete one runs, after the uninstall.
+*/}}
+{{- define "podium.hookServiceAccountName" -}}
+{{- $hooks := default (dict) .Values.hooks -}}
+{{- if $hooks.serviceAccountName -}}
+{{- $hooks.serviceAccountName -}}
+{{- else if not .Values.serviceAccount.create -}}
+{{- include "podium.serviceAccountName" . -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+A list of containers from the values, as YAML for a pod's containers or
+initContainers, empty for none. It takes the list as "value", its key, which a
+failure names, as "key", and the cluster's version as "kubeVersion". A value
+that is not a list stops the render, and so does a native sidecar, a container
+with restartPolicy Always, on a Kubernetes older than 1.29, which would drop
+the field and run it as an init container that never ends.
+*/}}
+{{- define "podium.containerList" -}}
+{{- $value := .value -}}
+{{- if not (or (kindIs "invalid" $value) (kindIs "slice" $value)) -}}
+{{- fail (printf "%s must be a list of containers, not a %s" .key (kindOf $value)) -}}
+{{- end -}}
+{{- range $value -}}
+{{- if and (kindIs "map" .) (eq (toString (get . "restartPolicy")) "Always") (semverCompare "<1.29.0-0" $.kubeVersion) -}}
+{{- fail (printf "%s: %v, a native sidecar (restartPolicy Always), needs Kubernetes 1.29 or later, not %s" $.key (get . "name") $.kubeVersion) -}}
+{{- end -}}
+{{- end -}}
+{{- if $value -}}
+{{- toYaml $value -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+The init containers of the hook Jobs, as podium.containerList renders them:
+hooks.initContainers when it is a list, even an empty one, and otherwise those
+of initContainers. A native sidecar among them, a proxy to the database say,
+serves the Job as it serves the replicas and stops once podium's command ends,
+so that the Job completes; a container beside podium would keep it from
+completing, and the Jobs take none.
+*/}}
+{{- define "podium.hookInitContainers" -}}
+{{- $hooks := default (dict) .Values.hooks -}}
+{{- $key := "initContainers" -}}
+{{- $value := .Values.initContainers -}}
+{{- if and (hasKey $hooks "initContainers") (not (kindIs "invalid" $hooks.initContainers)) -}}
+{{- $key = "hooks.initContainers" -}}
+{{- $value = $hooks.initContainers -}}
+{{- end -}}
+{{- include "podium.containerList" (dict "key" $key "value" $value "kubeVersion" .Capabilities.KubeVersion.Version) -}}
+{{- end }}
+
 {{- define "podium.imageTag" -}}
 {{- default .Chart.AppVersion .Values.image.tag }}
 {{- end }}
