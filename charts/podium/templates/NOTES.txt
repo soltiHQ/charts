@@ -57,8 +57,13 @@ agents and sessions are gone. For state that survives, use mode: database.
 {{- else }}
 
 The state lives in your Postgres database, which this chart neither runs nor backs up.
-{{- if .Values.migrate.job.enabled }}
+{{- $migrate := include "podium.migrateMode" . }}
+{{- if eq $migrate "job" }}
   The schema is migrated by the Job {{ include "podium.hookName" (dict "root" . "component" "migrate") }}, a hook before each install and upgrade.
+{{- else if eq $migrate "external" }}
+  The schema is migrated by a tool of your own (migrate.mode: external), before each install and upgrade:
+  a replica whose schema is older than its own refuses to start. podium schema version prints the version
+  an image needs, and podium schema export writes its migrations out.
 {{- else }}
   Each replica migrates the schema at start, under a database lock.
 {{- end }}

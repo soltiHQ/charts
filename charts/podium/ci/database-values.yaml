@@ -7,8 +7,7 @@ replicas: 3
 secrets:
   existingSecret: podium-secrets
 migrate:
-  job:
-    enabled: true
+  mode: job
 dropSchema:
   onUninstall: true
   wait: 90s

@@ -1,8 +1,10 @@
-{{- if and (eq (include "podium.mode" .) "database") .Values.migrate.job.enabled }}
 {{- /*
-podium migrate as a Helm hook, before the install and before each upgrade: it
-migrates the database the new release will use, from its own copies of the
-ConfigMap and the Secret (see "podium.hookJob").
+podium migrate as a Helm hook, before the install and before each upgrade, with
+migrate.mode job: it migrates the database the new release will use, from its
+own copies of the ConfigMap and the Secret (see "podium.hookJob"). migrate.mode
+is checked here in every mode.
 */ -}}
+{{- $migrate := include "podium.migrateMode" . }}
+{{- if and (eq (include "podium.mode" .) "database") (eq $migrate "job") }}
 {{ include "podium.hookJob" (dict "root" . "component" "migrate" "hook" "pre-install,pre-upgrade" "args" (list "migrate" "--config" "/etc/podium/podium.yaml") "deadline" .Values.migrate.job.activeDeadlineSeconds "backoffLimit" 2) }}
 {{- end }}

@@ -68,6 +68,29 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- end }}
 
 {{/*
+Who migrates the schema of the database mode, migrate.mode: start, each replica
+at its start; job, the hook Job of migrate.yaml before each install and upgrade;
+external, a tool of the deployment's own, as Bytebase, before the release, out
+of the chart's sight. With job and external the replicas do not migrate. Any
+other value stops the render, and so does migrate.job.enabled, which the
+previews of this chart had before migrate.mode.
+*/}}
+{{- define "podium.migrateMode" -}}
+{{- $values := default (dict) .Values.migrate -}}
+{{- if hasKey (default (dict) $values.job) "enabled" -}}
+{{- fail "migrate.job.enabled is replaced by migrate.mode: set migrate.mode to job for the hook Job" -}}
+{{- end -}}
+{{- $mode := "start" -}}
+{{- if and (hasKey $values "mode") (not (kindIs "invalid" $values.mode)) -}}
+{{- $mode = $values.mode -}}
+{{- end -}}
+{{- if not (has $mode (list "start" "job" "external")) -}}
+{{- fail (printf "migrate.mode must be start, job or external, not %q" (toString $mode)) -}}
+{{- end -}}
+{{- $mode -}}
+{{- end }}
+
+{{/*
 The name a follower checks the leader's certificate for, in the database mode
 with tls.server: tls.forwardServerName, or the UI Service's name. A name that is
 not a DNS name stops the render, as podium would refuse it at start.

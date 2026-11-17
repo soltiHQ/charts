@@ -125,11 +125,12 @@ helm install podium oci://ghcr.io/soltihq/charts/podium --version 0.0.2 \
   refresh on a replica that does not lead answers 503, so route browsers to the
   leader (`/leaderz` on the ops port answers 200 on it only); leave rotation off
   otherwise.
-- **Migrations.** By default each replica migrates the schema at start, under a
-  database lock, so replicas that start together migrate once. With
-  `migrate.job.enabled: true` a Helm hook Job runs `podium migrate` before the
-  install and before each upgrade, and the replicas get
-  `SOLTI_CLUSTER_DATABASE_MIGRATE=false`: a replica then refuses an older schema.
+- **Migrations.** `migrate.mode` says who migrates the schema. With `start`, the
+  default, each replica migrates it at start, under a database lock, so replicas
+  that start together migrate once. With `job` a Helm hook Job runs
+  `podium migrate` before the install and before each upgrade, and the replicas
+  get `SOLTI_CLUSTER_DATABASE_MIGRATE=false`: a replica then refuses an older
+  schema.
   A `pre-install` hook runs before the release's ConfigMap and Secret exist, and a
   `pre-upgrade` one before the new ones replace the old, so the Job brings copies
   of both of its own, hooks too, from the same values (with
@@ -139,6 +140,16 @@ helm install podium oci://ghcr.io/soltihq/charts/podium --version 0.0.2 \
   stays, for `kubectl logs`, and so do the copies with Helm 3.18 and older, while
   Helm 3.19 and later delete them. `--no-hooks` skips the Job, and the replicas
   then refuse the old schema.
+  With `external` a tool of your own, as Bytebase, applies podium's migrations
+  before the install and before each upgrade, the database first, then the
+  release; the chart runs no Job, and the replicas get
+  `SOLTI_CLUSTER_DATABASE_MIGRATE=false`. `podium schema export --dir DIR`
+  writes an image's migrations out, and `podium schema version` prints the
+  schema version it needs. Each file records its own version, so the replicas
+  see what the tool applied. The database URL may then be a role that only reads
+  and writes rows: podium's `migrations/README.md` lists its grants. The chart
+  refuses `dropSchema.onUninstall` with `external`: the schema is that tool's to
+  drop.
 - **Uninstall.** `helm uninstall` leaves the database as it is, unless
   `dropSchema.onUninstall` drops podium's tables with it: see
   [Uninstall](#uninstall).
@@ -217,7 +228,7 @@ In that case set `SOLTI_TLS_FORWARD_CA_FILE` to
 
 A Secret without the key that `tls.server.caKey` names fails the volume mount
 (`references non-existent secret key`): no pod starts, neither the replicas nor
-the migrate and drop-schema Jobs. With `migrate.job.enabled`, `helm install` and
+the migrate and drop-schema Jobs. With `migrate.mode: job`, `helm install` and
 `helm upgrade` wait for the migrate hook until their `--timeout` and fail, and
 the running replicas keep the previous revision. A name that the certificate
 lacks fails every write that reaches a follower with 502, and the follower's log
@@ -307,7 +318,9 @@ helm uninstall podium -n podium
 `--reset-then-reuse-values` (Helm 3.14 or later) applies the chart's defaults
 for the values the release did not set; plain `--reuse-values` keeps the old
 chart's values alone, and the chart then falls back on its own defaults for the
-`dropSchema` keys an older release lacks.
+`dropSchema` keys an older release lacks. With `migrate.mode: external` the
+chart refuses `dropSchema.onUninstall`: drop the schema with the tool that
+migrates it.
 
 - **It waits for the replicas.** A `post-delete` hook can run while the pods
   still stop, as `helm uninstall` does not always wait for them to be gone. A
@@ -361,7 +374,7 @@ chart's values alone, and the chart then falls back on its own defaults for the
 | `secrets.existingSecret` | `""` | A Secret with the keys of `secrets.keys`. |
 | `secrets.jwtSecret`, `secrets.enrollSecret`, `secrets.bootstrapAdminPassword` | `""` | For a Secret the chart makes, when `existingSecret` is empty. |
 | `secrets.databaseUrl`, `secrets.databaseReplicaUrl` | `""` | Database mode: the primary (required with the chart's own Secret) and the optional read endpoint; the keys `database-url` and `database-replica-url` of an existing Secret. |
-| `migrate.job.enabled`, `migrate.job.activeDeadlineSeconds` | `false`, `600` | Database mode: `podium migrate` as a pre-install and pre-upgrade hook. |
+| `migrate.mode`, `migrate.job.activeDeadlineSeconds` | `start`, `600` | Database mode: who migrates the schema: each replica at start (`start`), `podium migrate` as a pre-install and pre-upgrade hook (`job`), or a tool of your own (`external`). |
 | `dropSchema.onUninstall`, `dropSchema.wait`, `dropSchema.activeDeadlineSeconds` | `false`, `2m`, `240` | Database mode: `podium drop-schema` as a post-delete hook, which drops podium's tables, and all of its data, at `helm uninstall` ([Uninstall](#uninstall)). |
 | `secrets.allowOpenEnrollment` | `false` | Allows running without an enrollment secret. |
 | `config` | log at info as JSON, `shutdown_delay: 5s`, `shutdown_timeout: 15s` | podium's `podium.yaml`. |

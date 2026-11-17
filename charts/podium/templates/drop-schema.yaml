@@ -10,6 +10,9 @@ only show at the uninstall; dropSchema.onUninstall is checked in every mode.
 */ -}}
 {{- $drop := include "podium.dropSchemaOnUninstall" . }}
 {{- if and (eq (include "podium.mode" .) "database") $drop }}
+{{- if eq (include "podium.migrateMode" .) "external" }}
+{{- fail "dropSchema.onUninstall drops the schema that another tool migrates with migrate.mode external, whose record of what it applied would no longer match: drop it with that tool, and leave dropSchema.onUninstall false" }}
+{{- end }}
 {{- $values := default (dict) .Values.dropSchema }}
 {{- $wait := "2m" }}
 {{- if hasKey $values "wait" }}

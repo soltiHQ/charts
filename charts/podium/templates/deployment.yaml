@@ -72,7 +72,7 @@ spec:
             # the forwarding strips, so one form serves both IP families.
             - name: SOLTI_CLUSTER_DATABASE_ADVERTISE_ADDR
               value: "[$(POD_IP)]:8080"
-            {{- if .Values.migrate.job.enabled }}
+            {{- if ne (include "podium.migrateMode" .) "start" }}
             - name: SOLTI_CLUSTER_DATABASE_MIGRATE
               value: "false"
             {{- end }}

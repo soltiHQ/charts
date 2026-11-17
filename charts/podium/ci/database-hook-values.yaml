@@ -8,7 +8,6 @@ secrets:
   bootstrapAdminPassword: ci-only-password
   databaseUrl: postgres://podium:ci-only-password@db-primary.example.com:5432/podium?sslmode=verify-full
 migrate:
-  job:
-    enabled: true
+  mode: job
 dropSchema:
   onUninstall: true

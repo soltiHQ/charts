@@ -129,18 +129,27 @@ tls:
   # IPs. Empty: the UI Service's name, <fullname>.<namespace>.svc.
   forwardServerName: ""
 
-# Database mode: podium migrate as a Helm hook, before the install and before each
-# upgrade. When enabled, the replicas get SOLTI_CLUSTER_DATABASE_MIGRATE=false and
-# do not migrate at start; when not, each replica migrates at start, under a
-# database lock, so replicas that start together migrate once. The Job brings its
-# own copies of the ConfigMap and the Secret, hooks too, from these values.
-# helm install --no-hooks and helm upgrade --no-hooks skip it, and the replicas
-# then refuse the old schema.
+# Database mode: who migrates the schema, mode:
+#   start     each replica at start, under a database lock, so replicas that
+#             start together migrate once.
+#   job       podium migrate as a Helm hook, before the install and before each
+#             upgrade. The Job brings its own copies of the ConfigMap and the
+#             Secret, hooks too, from these values. helm install --no-hooks and
+#             helm upgrade --no-hooks skip it, and the replicas then refuse the
+#             old schema.
+#   external  a tool of your own, as Bytebase, before the install and before
+#             each upgrade, from podium's migrations (podium schema export
+#             writes them out); the chart runs no Job. The database URL may
+#             then be a role that only reads and writes rows. dropSchema.
+#             onUninstall must stay false: the schema is that tool's to drop.
+# With job and external the replicas get SOLTI_CLUSTER_DATABASE_MIGRATE=false
+# and do not migrate: one whose schema is older than its own refuses to start.
+# Anything else stops the render.
 migrate:
+  mode: start
   job:
-    enabled: false
-    # The Job's limit, including the 30 seconds podium waits for an unreachable
-    # database before it fails.
+    # The Job's limit, with mode job, including the 30 seconds podium waits for
+    # an unreachable database before it fails.
     activeDeadlineSeconds: 600
 
 # Database mode: podium drop-schema as a Helm hook after helm uninstall. When
