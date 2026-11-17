@@ -13,7 +13,7 @@ state lives; nothing moves from one to the other.
 
 | | |
 | -- | -- |
-| Image | `ghcr.io/soltihq/podium`, the chart's `appVersion` (`v0.0.1-rc.1`) unless `image.tag` or `image.digest` says otherwise. Both modes need an image newer than the `appVersion`, which predates them: the memory mode one with podium's `memory` backend, the database mode one with its `database` backend. Set `image.tag` or `image.digest`; the release that publishes the chart sets `appVersion` |
+| Image | `ghcr.io/soltihq/podium`, the chart's `appVersion` (`v0.0.1-rc.2`) unless `image.tag` or `image.digest` says otherwise: the first podium release with both modes, `podium drop-schema` and `podium schema export`. Older images lack them |
 | Kubernetes | 1.25 or later |
 | Helm | 3.8 or later |
 
@@ -70,8 +70,7 @@ kubectl -n podium create secret generic podium-secrets \
   --from-literal=database-replica-url='postgres://podium_ro:<password>@db-replica.example.com:5432/podium?sslmode=verify-full'
 
 helm install podium oci://ghcr.io/soltihq/charts/podium --version 0.0.2 \
-  -n podium --set mode=database --set secrets.existingSecret=podium-secrets \
-  --set image.tag=<a release with the database mode>
+  -n podium --set mode=database --set secrets.existingSecret=podium-secrets
 ```
 
 - **The URLs.** `database-url` is the primary and `database-replica-url`, which
@@ -276,11 +275,12 @@ The memory mode has nothing to back up: the state is lost with the pod. In the
 database mode the state is the database: back it up with its own tools, as the
 chart neither runs nor backs up it.
 
-An upgrade changes `image.tag`. The memory mode's Deployment stops the old pod
-before it starts the new one; the database mode's starts a new replica, ready,
-before an old one stops (`maxSurge: 1`, `maxUnavailable: 0`). A newer podium may
-write state an older one cannot read: take a backup before you upgrade, as there
-is no downgrade.
+An upgrade changes the image: a chart with a newer `appVersion`, or
+`image.tag`. The memory mode's Deployment stops the old pod before it starts the
+new one; the database mode's starts a new replica, ready, before an old one
+stops (`maxSurge: 1`, `maxUnavailable: 0`). A newer podium may write state an
+older one cannot read: take a backup before you upgrade, as there is no
+downgrade.
 
 ### From chart 0.0.1
 
@@ -362,7 +362,7 @@ migrates it.
   job,configmap,secret -l
   app.kubernetes.io/instance=podium,app.kubernetes.io/component=drop-schema`.
 - `helm uninstall --no-hooks` skips it, and the memory mode, which has no
-  database, never runs it. It needs an image with `podium drop-schema`.
+  database, never runs it.
 
 ## Values
 

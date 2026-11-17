@@ -3,7 +3,7 @@ name: podium
 description: podium, the solti control plane, as one node with its state in memory, or as replicas that share a Postgres database
 type: application
 version: 0.0.2
-appVersion: "v0.0.1-rc.1"
+appVersion: "v0.0.1-rc.2"
 kubeVersion: ">=1.25.0-0"
 home: https://github.com/soltiHQ/podium
 # The first source is the org.opencontainers.image.source of the chart's OCI

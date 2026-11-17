@@ -7,11 +7,10 @@
 #           replicas hold no state: one of them leads, through a lease row, and
 #           runs the leader-only work, and the others forward their writes to it.
 #
-# Both modes need an image newer than the chart's appVersion, which predates
-# them: the memory mode one built with Part A of podium's storage modes (the
-# `memory` backend), the database mode one built with Part B (the `database`
-# backend). Set image.tag or image.digest; the release that publishes the chart
-# sets appVersion.
+# The image defaults to the chart's appVersion, v0.0.1-rc.2: the first podium
+# release with both modes, podium drop-schema and podium schema export. Older
+# images lack them: image.tag or image.digest picks another, v0.0.1-rc.2 or
+# later.
 #
 # raft is not covered by this chart. Changing the mode of a release changes where
 # the state lives: nothing moves from one to the other.
@@ -174,8 +173,7 @@ migrate:
 # are gone; everything else the pod refers to must still exist at the
 # uninstall: the Secret of secrets.existingSecret, the TLS Secrets, the objects
 # of extraVolumes and extraEnvFrom, the imagePullSecrets. helm uninstall
-# --no-hooks skips it. It needs an image with podium drop-schema. See the
-# README, "Uninstall".
+# --no-hooks skips it. See the README, "Uninstall".
 dropSchema:
   onUninstall: false
   # How long podium drop-schema waits for the replicas to stop, and for a lock
