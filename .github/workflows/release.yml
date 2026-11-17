@@ -1,39 +1,55 @@
 name: Release flow
 
-# Every chart version on main that GHCR does not hold yet is pushed to
-# oci://ghcr.io/soltihq/charts/<chart>; a version already there is never pushed
-# again, so a change to a chart needs a new version (the PR flow checks it).
+# A tag <chart>-<version>, as podium-0.0.2, publishes that chart version to
+# oci://ghcr.io/soltihq/charts/<chart>, once: the tag's commit must be on main,
+# its charts/<chart>/Chart.yaml must have that name and that version, the checks
+# of the PR flow must pass on it, and GHCR must not hold the version yet
+# (scripts/publish-chart.sh). A merge to main publishes nothing.
 on:
   push:
-    branches: [main]
-    paths: ['charts/**']
-  workflow_dispatch: {}
+    tags:
+      - '*-[0-9]+.[0-9]+.[0-9]+'
+      - '*-[0-9]+.[0-9]+.[0-9]+-*'
 
 concurrency:
-  group: release
+  group: release-${{ github.ref_name }}
   cancel-in-progress: false
 
 permissions: {}
 
 jobs:
   publish:
-    name: Publish charts
+    name: Publish the chart
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 15
     permissions:
       contents: read
       packages: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          # The check that the tag's commit is on main needs main's history.
+          fetch-depth: 0
           persist-credentials: false
+      - name: Check that the tag's commit is on main
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "tag $TAG: its commit $GITHUB_SHA is not on main; tag a commit of main" >&2
+            exit 1
+          fi
       - uses: azure/setup-helm@2f5e7bc67f1f9972ab16657bb795f36d8f04de0e # v5.1.0
         with:
           version: v4.3.1
+      - name: Lint, render and validate every chart
+        run: ./scripts/check-charts.sh
       - name: Log in to GHCR
         env:
           ACTOR: ${{ github.actor }}
           TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: printf '%s' "$TOKEN" | helm registry login ghcr.io --username "$ACTOR" --password-stdin
-      - name: Push the chart versions GHCR does not hold
-        run: ./scripts/publish-charts.sh oci://ghcr.io/soltihq/charts
+      - name: Publish the chart version of the tag
+        env:
+          TAG: ${{ github.ref_name }}
+        run: ./scripts/publish-chart.sh "$TAG" oci://ghcr.io/soltihq/charts
