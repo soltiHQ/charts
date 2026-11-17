@@ -1,6 +1,24 @@
-# The chart runs one podium node in standalone mode: its state lives on one
-# ReadWriteOnce volume, so the StatefulSet always has one replica. A raft
-# cluster is not covered by this chart.
+# The chart runs podium in one of two modes.
+#
+# memory:   one node whose state lives in the pod's memory and is lost with the
+#           pod. One replica, a Deployment that stops the old pod before it
+#           starts the new one, and no volume. For trying podium out.
+# database: replicas of podium that share a Postgres database you provide. The
+#           replicas hold no state: one of them leads, through a lease row, and
+#           runs the leader-only work, and the others forward their writes to it.
+#
+# The image defaults to the chart's appVersion, v0.0.1-rc.2: the first podium
+# release with both modes, podium drop-schema and podium schema export. Older
+# images lack them: image.tag or image.digest picks another, v0.0.1-rc.2 or
+# later.
+#
+# raft is not covered by this chart. Changing the mode of a release changes where
+# the state lives: nothing moves from one to the other.
+mode: memory
+
+# The replicas of the database mode, 2 or more for availability. The memory mode
+# always runs one.
+replicas: 2
 
 image:
   repository: ghcr.io/soltihq/podium
@@ -26,16 +44,32 @@ secrets:
     jwtSecret: jwt-secret
     enrollSecret: enroll-secret
     bootstrapAdminPassword: bootstrap-admin-password
+    # Database mode: the primary, and the optional read endpoint.
+    databaseUrl: database-url
+    databaseReplicaUrl: database-replica-url
   # SOLTI_AUTH_JWT_SECRET: 32 bytes or more (openssl rand -hex 32).
   jwtSecret: ""
   # SOLTI_AGENT_AUTH_ENROLL_SECRET: 32 bytes or more (openssl rand -hex 32).
   enrollSecret: ""
   # SOLTI_BOOTSTRAP_ADMIN_PASSWORD: the first administrator's password, 12
-  # characters to 72 bytes, used on the first start only. Set it for the first
-  # install: the image has no shell, so the password podium generates without
-  # it stays in a file in the volume that kubectl cannot read. Remove it once
-  # you changed the password; podium warns about it at each start until then.
+  # characters to 72 bytes. Memory mode: each start seeds the administrator
+  # again, from this password when set, else from a random one that podium logs
+  # once at WARN (kubectl logs); keep the key to get one password across
+  # restarts, as the state, a changed password included, is lost with the pod.
+  # Database mode: an empty database needs it, and podium refuses to start
+  # without it. It is used on the first start only: once users exist podium
+  # ignores it and the leader warns about it at the start of each of its terms,
+  # so remove the key after you changed the password, and restart.
   bootstrapAdminPassword: ""
+  # Database mode: SOLTI_CLUSTER_DATABASE_URL, the primary, for example
+  # postgres://podium:<password>@db.example.com:5432/podium?sslmode=verify-full.
+  # The URL carries the password: prefer an existing Secret with the key
+  # database-url, so that it stays out of your Helm values and release history.
+  # The chart never generates it.
+  databaseUrl: ""
+  # SOLTI_CLUSTER_DATABASE_REPLICA_URL, optional: a read endpoint that serves the
+  # lists of the UI and the API, which can lag the primary.
+  databaseReplicaUrl: ""
   # Without an enrollment secret, any host that reaches the agents' listeners
   # can enroll a new agent ID (trust on first use). The chart refuses to render
   # without one unless this is true.
@@ -44,7 +78,9 @@ secrets:
 # podium.yaml, mounted at /etc/podium/podium.yaml and passed with --config.
 # Loading is strict: a key that is not a setting, or a key without a value,
 # stops podium at start. The environment wins over this file; the chart sets
-# SOLTI_CLUSTER_STANDALONE_DATA_DIR, and the image sets SOLTI_OPS_ADDR=:8081.
+# SOLTI_CLUSTER_BACKEND (and, in the database mode, the database URLs and the
+# advertise address), and the image sets SOLTI_OPS_ADDR=:8081. Database settings
+# the chart does not set go here, under cluster.database: lease, max_open_conns.
 # Every setting: https://github.com/soltiHQ/podium/blob/main/internal/config/README.md#every-setting
 config:
   log:
@@ -72,11 +108,84 @@ tls:
   server:
     # A kubernetes.io/tls Secret (tls.crt, tls.key), cert-manager's for example.
     secretName: ""
+    # Database mode: the key of that Secret that holds the CA of its
+    # certificate, against which a follower checks the leader's certificate
+    # when it forwards a write. cert-manager writes ca.crt for a CA or a
+    # self-signed issuer. Set "" for a certificate of a public CA: a follower
+    # then checks the leader against the system roots, or against
+    # SOLTI_TLS_CLIENT_CA_FILE when extraEnv sets it (see the README,
+    # "Replicas over TLS"). The Secret must hold the key named here, or no pod
+    # starts.
+    caKey: ca.crt
     # The agents' CA: with it, the agents' listeners (8082, 50051) require a
     # client certificate of that CA. The UI never asks for one.
     clientCA:
       secretName: ""
       key: ca.crt
+  # Database mode: the name a follower checks the leader's certificate for when
+  # it forwards a write, so that the certificate of tls.server must carry it as
+  # a DNS name. The replicas share that one certificate, whatever their pod
+  # IPs. Empty: the UI Service's name, <fullname>.<namespace>.svc.
+  forwardServerName: ""
+
+# Database mode: who migrates the schema, mode:
+#   start     each replica at start, under a database lock, so replicas that
+#             start together migrate once.
+#   job       podium migrate as a Helm hook, before the install and before each
+#             upgrade. The Job brings its own copies of the ConfigMap and the
+#             Secret, hooks too, from these values. helm install --no-hooks and
+#             helm upgrade --no-hooks skip it, and the replicas then refuse the
+#             old schema.
+#   external  a tool of your own, as Bytebase, before the install and before
+#             each upgrade, from podium's migrations (podium schema export
+#             writes them out); the chart runs no Job. The database URL may
+#             then be a role that only reads and writes rows. dropSchema.
+#             onUninstall must stay false: the schema is that tool's to drop.
+# With job and external the replicas get SOLTI_CLUSTER_DATABASE_MIGRATE=false
+# and do not migrate: one whose schema is older than its own refuses to start.
+# Anything else stops the render.
+migrate:
+  mode: start
+  job:
+    # The Job's limit, with mode job, including the 30 seconds podium waits for
+    # an unreachable database before it fails.
+    activeDeadlineSeconds: 600
+
+# Database mode: podium drop-schema as a Helm hook after helm uninstall. When
+# on, the uninstall drops every table of podium's from the database, and all of
+# its data with them: users, agents, specs, rollouts, run history. Nothing
+# brings them back but a backup. Off, the uninstall leaves the database as it
+# is, and a later install on it finds the state again. podium drops its own
+# tables only: no other table, no schema of the database's, not the database.
+#
+# onUninstall must be true or false, unquoted: anything else stops the render,
+# as a string "false" would count as true. The hook is stored with the release:
+# set this with helm install or helm upgrade before you uninstall, for example
+#   helm upgrade <release> <chart> --reset-then-reuse-values \
+#     --set dropSchema.onUninstall=true
+# It runs once Helm deleted the release's objects, while their pods may still
+# stop: podium drop-schema waits until no replica runs on the database, then
+# drops the tables in one transaction. Only replicas that run protect the
+# database: one still running once wait is over, of another release on the same
+# database say, fails the Job, and nothing is dropped; a deployment that runs no
+# replica at that moment is not seen. The Job makes one attempt (backoffLimit
+# 0). It brings its own copies of the ConfigMap and the Secret, as the release's
+# are gone; everything else the pod refers to must still exist at the
+# uninstall: the Secret of secrets.existingSecret, the TLS Secrets, the objects
+# of extraVolumes and extraEnvFrom, the imagePullSecrets. helm uninstall
+# --no-hooks skips it. See the README, "Uninstall".
+dropSchema:
+  onUninstall: false
+  # How long podium drop-schema waits for the replicas to stop, and for a lock
+  # another session holds on a table, a duration of 16 characters at most: more
+  # than terminationGracePeriodSeconds, and the lease on top for a leader that
+  # is killed, whose lease expires rather than being released.
+  wait: 2m
+  # The Job's limit, a whole number of seconds: the wait, the 30 seconds podium
+  # waits for an unreachable database, and the drop. helm uninstall waits for
+  # the hook up to its --timeout, 5 minutes by default: keep that above this
+  # limit, plus the time to schedule the pod and pull the image.
+  activeDeadlineSeconds: 240
 
 # Extra environment variables, volumes and mounts for the podium container,
 # for tls.client (podium as a client of the agents) for instance.
@@ -85,17 +194,43 @@ extraEnvFrom: []
 extraVolumes: []
 extraVolumeMounts: []
 
-persistence:
-  # Without persistence the state lives in an emptyDir and is lost with the pod.
-  enabled: true
-  # An existing PersistentVolumeClaim to use instead of the StatefulSet's own.
-  existingClaim: ""
-  # "" uses the cluster's default StorageClass; "-" sets storageClassName "".
-  storageClass: ""
-  accessModes:
-    - ReadWriteOnce
-  size: 1Gi
-  annotations: {}
+# Containers for the pods of the Deployment besides podium, as Kubernetes takes
+# them. initContainers run before podium starts. One with restartPolicy: Always
+# is a native sidecar (Kubernetes 1.29 and later; the chart refuses one on an
+# older cluster): it starts before podium, which waits for its startupProbe,
+# runs beside it, and stops after it, so podium keeps it through its shutdown:
+# the form for a proxy to the database, as Google's cloud-sql-proxy.
+# extraContainers run beside podium, started and stopped with it. The hook Jobs
+# take initContainers too, unless hooks.initContainers says otherwise. See the
+# README, "Containers beside podium".
+initContainers: []
+extraContainers: []
+
+# The hook Jobs: podium migrate before the install and each upgrade
+# (migrate.mode job), podium drop-schema after the uninstall
+# (dropSchema.onUninstall).
+hooks:
+  # Their init containers: null, those of initContainers; a list, even an empty
+  # one, instead of them. A native sidecar stops once podium's command ends, and
+  # the Job completes. The Jobs take no container beside podium, which would
+  # keep them from completing.
+  initContainers: null
+  # Their pods' annotations, labels, nodeSelector, affinity and tolerations:
+  # null, the replicas' own; set, even empty, instead of them. An anti-affinity
+  # rule against the replicas, say, keeps a Job off every node a replica runs
+  # on, and from any node at all when the replicas cover them: set affinity
+  # here. The Jobs take the replicas' priorityClassName, hostAliases, dnsPolicy
+  # and dnsConfig as they are.
+  podAnnotations: null
+  podLabels: null
+  nodeSelector: null
+  affinity: null
+  tolerations: null
+  # The ServiceAccount they run as, one that exists before the install and
+  # after the uninstall, as the release's own does not. Empty: with
+  # serviceAccount.create false, serviceAccount.name; otherwise the namespace's
+  # default.
+  serviceAccountName: ""
 
 # The web UI and the REST API (8080).
 service:
@@ -164,9 +299,11 @@ podSecurityContext:
   runAsNonRoot: true
   runAsUser: 65532
   runAsGroup: 65532
-  # fsGroup makes the volume writable by podium; OnRootMismatch keeps Kubernetes
-  # from adding group permissions to the data directory inside it at each start,
-  # which podium would refuse.
+  # fsGroup applies to the volumes the chart mounts, the config and the TLS
+  # Secrets, whose files it makes group 65532, and to a volume that extraVolumes
+  # adds when its type supports it. fsGroupChangePolicy matters only for such an
+  # added volume, a PersistentVolumeClaim for one: Kubernetes ignores it for
+  # ConfigMap and Secret volumes.
   fsGroup: 65532
   fsGroupChangePolicy: OnRootMismatch
   seccompProfile:
@@ -187,7 +324,7 @@ resources:
     memory: 512Mi
 
 # A graceful stop takes up to server.shutdown_delay, plus
-# server.shutdown_timeout, plus 30 seconds to close the store: 50 seconds with
+# server.shutdown_timeout, plus 30 seconds to close the hubs and connections: 50 seconds with
 # the defaults above. Raise this with them.
 terminationGracePeriodSeconds: 60
 
@@ -206,6 +343,43 @@ priorityClassName: ""
 nodeSelector: {}
 tolerations: []
 affinity: {}
+
+# Spreads the replicas over zones or nodes, as Kubernetes takes them; a
+# constraint without labelSelector gets the Deployment's selector labels. For
+# example, one replica per node:
+#   - maxSkew: 1
+#     topologyKey: kubernetes.io/hostname
+#     whenUnsatisfiable: DoNotSchedule
+topologySpreadConstraints: []
+
+# Database mode: the replicas' PodDisruptionBudget, with two or more, so that a
+# drain evicts one at a time, each once its successor is ready. minAvailable,
+# when set, wins over maxUnavailable; either a number or a percentage.
+# unhealthyPodEvictionPolicy: AlwaysAllow lets a drain evict a replica that is
+# not ready, which the budget otherwise counts as one already gone.
+podDisruptionBudget:
+  enabled: true
+  maxUnavailable: 1
+  minAvailable: null
+  unhealthyPodEvictionPolicy: ""
+
+# The podium container's lifecycle hooks. podium already waits
+# server.shutdown_delay before it stops serving, for the endpoints to drop the
+# pod: a preStop hook adds to that, within terminationGracePeriodSeconds.
+lifecycle: {}
+
+# Name resolution of the pods, the replicas' and the hook Jobs': entries of
+# /etc/hosts, the DNS policy and the DNS settings, as Kubernetes takes them.
+hostAliases: []
+dnsPolicy: ""
+dnsConfig: {}
+
+# Manifests of your own, released with the chart's: each a map or a string,
+# rendered as a template of the release, so that {{ .Release.Name }} and the
+# like work in them. They are created with the release's objects, after the
+# pre-install hooks: an object a hook Job needs, a ServiceAccount of
+# hooks.serviceAccountName say, must exist before the install.
+extraObjects: []
 
 # helm test: checks /readyz on the ops Service.
 tests:

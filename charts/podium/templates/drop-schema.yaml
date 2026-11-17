@@ -1,0 +1,32 @@
+{{- /*
+podium drop-schema as a Helm hook after helm uninstall: once Helm deleted the
+release's objects, while their pods may still stop, it waits until no replica
+runs on the database, up to dropSchema.wait, then drops every table of podium's,
+and all its data, in one transaction, from its own copies of the ConfigMap and
+the Secret (see "podium.hookJob"). The Job makes one attempt, so that the wait
+bounds it: podium retries an unreachable database itself. The values are checked
+here, at the install or the upgrade that stores the hook, as a wrong one would
+only show at the uninstall; dropSchema.onUninstall is checked in every mode.
+*/ -}}
+{{- $drop := include "podium.dropSchemaOnUninstall" . }}
+{{- if and (eq (include "podium.mode" .) "database") $drop }}
+{{- if eq (include "podium.migrateMode" .) "external" }}
+{{- fail "dropSchema.onUninstall drops the schema that another tool migrates with migrate.mode external, whose record of what it applied would no longer match: drop it with that tool, and leave dropSchema.onUninstall false" }}
+{{- end }}
+{{- $values := default (dict) .Values.dropSchema }}
+{{- $wait := "2m" }}
+{{- if hasKey $values "wait" }}
+{{- $wait = toString $values.wait }}
+{{- end }}
+{{- if or (gt (len $wait) 16) (not (regexMatch "^([0-9]{1,6}(\\.[0-9]{1,9})?(ns|us|ms|s|m|h))+$" $wait)) }}
+{{- fail (printf "dropSchema.wait must be a duration such as 2m or 90s, of 16 characters at most, not %q" $wait) }}
+{{- end }}
+{{- $deadline := 240 }}
+{{- if hasKey $values "activeDeadlineSeconds" }}
+{{- $deadline = $values.activeDeadlineSeconds }}
+{{- end }}
+{{- if or (not (or (kindIs "int" $deadline) (kindIs "int64" $deadline) (kindIs "float64" $deadline))) (lt (float64 $deadline) 1.0) (ne (float64 (int64 $deadline)) (float64 $deadline)) }}
+{{- fail (printf "dropSchema.activeDeadlineSeconds must be a whole number of seconds, 1 or more, not %v" $deadline) }}
+{{- end }}
+{{ include "podium.hookJob" (dict "root" . "component" "drop-schema" "hook" "post-delete" "args" (list "drop-schema" "--yes" "--wait" $wait "--config" "/etc/podium/podium.yaml") "deadline" (int64 $deadline) "backoffLimit" 0) }}
+{{- end }}

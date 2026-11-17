@@ -1,0 +1,63 @@
+# The database mode on GKE with Cloud SQL: the Cloud SQL Auth Proxy as a native
+# sidecar of the replicas and of the hook Jobs, which run under a ServiceAccount
+# of the deployment's own, bound to a Google service account by Workload
+# Identity; a log shipper beside podium.
+mode: database
+secrets:
+  existingSecret: podium-secrets
+migrate:
+  mode: job
+dropSchema:
+  onUninstall: true
+serviceAccount:
+  create: false
+  name: podium
+initContainers:
+  - name: cloud-sql-proxy
+    image: gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.28.0
+    restartPolicy: Always
+    args:
+      - --private-ip
+      - my-project:europe-west1:podium
+    env:
+      - name: CSQL_PROXY_PORT
+        value: "5432"
+      - name: CSQL_PROXY_HEALTH_CHECK
+        value: "true"
+      - name: CSQL_PROXY_HTTP_PORT
+        value: "9801"
+      - name: CSQL_PROXY_HTTP_ADDRESS
+        value: 0.0.0.0
+      - name: CSQL_PROXY_EXIT_ZERO_ON_SIGTERM
+        value: "true"
+      - name: CSQL_PROXY_STRUCTURED_LOGS
+        value: "true"
+    startupProbe:
+      httpGet:
+        path: /startup
+        port: 9801
+      periodSeconds: 1
+      failureThreshold: 60
+    livenessProbe:
+      httpGet:
+        path: /liveness
+        port: 9801
+      periodSeconds: 10
+      failureThreshold: 3
+    securityContext:
+      runAsNonRoot: true
+      readOnlyRootFilesystem: true
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop:
+          - ALL
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+extraContainers:
+  - name: log-shipper
+    image: busybox:1.37
+    args:
+      - sleep
+      - infinity

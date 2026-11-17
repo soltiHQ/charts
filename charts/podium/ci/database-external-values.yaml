@@ -1,0 +1,11 @@
+# The database mode whose schema a tool of its own migrates, as Bytebase: no
+# migration Job, the replicas do not migrate, and the database URL is a role
+# that only reads and writes rows.
+mode: database
+secrets:
+  jwtSecret: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+  enrollSecret: fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210
+  bootstrapAdminPassword: ci-only-password
+  databaseUrl: postgres://podium_app:ci-only-password@db-primary.example.com:5432/podium?sslmode=verify-full
+migrate:
+  mode: external

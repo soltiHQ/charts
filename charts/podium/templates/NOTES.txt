@@ -1,4 +1,5 @@
-podium {{ include "podium.imageTag" . }} runs as the StatefulSet {{ include "podium.fullname" . }} in {{ .Release.Namespace }}.
+{{- $mode := include "podium.mode" . -}}
+podium {{ include "podium.imageTag" . }} runs in {{ $mode }} mode as the Deployment {{ include "podium.fullname" . }} in {{ .Release.Namespace }}{{ if eq $mode "database" }}, {{ .Values.replicas }} replicas{{ end }}.
 
 Web UI and API:
 {{- if .Values.ingress.enabled }}
@@ -11,15 +12,19 @@ Web UI and API:
 {{- end }}
 
 First administrator: user admin.
-{{- if or .Values.secrets.bootstrapAdminPassword .Values.secrets.existingSecret }}
-  Its password is the Secret's {{ .Values.secrets.keys.bootstrapAdminPassword }} key, when set. Change it after the
-  first login, then remove that key: podium warns about it at each start while users exist.
+{{- if eq $mode "database" }}
+  Its password is the Secret's {{ .Values.secrets.keys.bootstrapAdminPassword }} key. An empty database needs it:
+  without it the replicas stop at start. Change the password after the first login, then remove that key
+  and restart the Deployment: podium warns about it at each start while users exist.
+{{- else if .Values.secrets.bootstrapAdminPassword }}
+  Its password is the Secret's {{ .Values.secrets.keys.bootstrapAdminPassword }} key.
+{{- else if .Values.secrets.existingSecret }}
+  Its password is the {{ .Values.secrets.keys.bootstrapAdminPassword }} key of the Secret {{ .Values.secrets.existingSecret }}. Without that key podium
+  generated one and logged it once, at WARN, at each start:
+  kubectl -n {{ .Release.Namespace }} logs deploy/{{ include "podium.fullname" . }} | grep "admin password generated"
 {{- else }}
-  No bootstrap password was given, so podium generated one into
-  {{ include "podium.dataDir" . }}/bootstrap-admin-password on the volume. The image has no shell, so
-  kubectl exec and kubectl cp cannot read it, and podium ignores a bootstrap password once the user
-  exists: uninstall, delete the PersistentVolumeClaim data-{{ include "podium.fullname" . }}-0, and install
-  again with secrets.bootstrapAdminPassword set.
+  No bootstrap password was given, so podium generated one and logged it once, at WARN, at each start:
+  kubectl -n {{ .Release.Namespace }} logs deploy/{{ include "podium.fullname" . }} | grep "admin password generated"
 {{- end }}
 
 Agents reach the {{ include "podium.fullname" . }}-agents Service ({{ .Values.agents.service.type }}):
@@ -29,25 +34,64 @@ Agents reach the {{ include "podium.fullname" . }}-agents Service ({{ .Values.ag
 {{- end }}
 {{- if or .Values.secrets.enrollSecret .Values.secrets.existingSecret }}
   An agent's token, derived from the enrollment secret:
-  kubectl -n {{ .Release.Namespace }} exec {{ include "podium.fullname" . }}-0 -- /podium agent-token <agent-id>
+  kubectl -n {{ .Release.Namespace }} exec deploy/{{ include "podium.fullname" . }} -- /podium agent-token <agent-id>
 {{- else }}
   WARNING: no enrollment secret: any host that reaches these ports can enroll a new agent ID.
 {{- end }}
 {{- if .Values.tls.server.secretName }}
   The listeners serve TLS with the certificate of the Secret {{ .Values.tls.server.secretName }}{{ if .Values.tls.server.clientCA.secretName }}, and the agents' listeners require a client certificate{{ end }}.
+{{- if eq $mode "database" }}
+  A follower checks the leader's certificate for {{ include "podium.forwardServerName" . }}{{ with include "podium.forwardCAKey" . }}, against the Secret's {{ . }}{{ end }}:
+  the certificate must carry that name, or every write that reaches a follower answers 502.
+{{- end }}
 {{- else }}
   The listeners serve plaintext: the SDK sends an agent's token only over TLS, unless the agent allows
   insecure token transport. Set tls.server.secretName for TLS.
 {{- end }}
-  podium calls each agent at the endpoint it registers, so the agents' endpoints must be reachable from this pod.
+  podium calls each agent at the endpoint it registers, so the agents' endpoints must be reachable from the pods.
 
-{{- if not .Values.persistence.enabled }}
+{{- if eq $mode "memory" }}
 
-WARNING: persistence is off: the state lives in an emptyDir and is lost with the pod.
+The state lives in memory and is lost with the pod: every restart starts empty, and the users, specs,
+agents and sessions are gone. For state that survives, use mode: database.
+{{- else }}
+
+The state lives in your Postgres database, which this chart neither runs nor backs up.
+{{- $migrate := include "podium.migrateMode" . }}
+{{- if eq $migrate "job" }}
+  The schema is migrated by the Job {{ include "podium.hookName" (dict "root" . "component" "migrate") }}, a hook before each install and upgrade.
+{{- else if eq $migrate "external" }}
+  The schema is migrated by a tool of your own (migrate.mode: external), before each install and upgrade:
+  a replica whose schema is older than its own refuses to start. podium schema version prints the version
+  an image needs, and podium schema export writes its migrations out.
+{{- else }}
+  Each replica migrates the schema at start, under a database lock.
+{{- end }}
+{{- if lt (int .Values.replicas) 2 }}
+  WARNING: one replica: a restart of it leaves nothing to serve in the meantime.
+{{- end }}
+{{- if include "podium.dropSchemaOnUninstall" . }}
+  WARNING: helm uninstall drops every table of podium's from the database, and all of its data, once
+  the replicas stopped (dropSchema.onUninstall). There is no undo: back the database up first.
+{{- end }}
+{{- if and (or (eq $migrate "job") (include "podium.dropSchemaOnUninstall" .)) .Values.serviceAccount.annotations (not (include "podium.hookServiceAccountName" .)) }}
+  WARNING: the hook Jobs run under the namespace's default ServiceAccount, without the annotations of
+  serviceAccount, a Workload Identity binding say: the release's own exists neither before the install
+  nor after the uninstall. Name one of yours in hooks.serviceAccountName, or set serviceAccount.create
+  false and serviceAccount.name, which the Jobs then take too.
+{{- end }}
+{{- if not .Values.tls.server.secretName }}
+  WARNING: without tls.server the replicas forward each other's writes, logins, cookies and tokens
+  included, in plaintext.
+{{- end }}
 {{- end }}
 
+Upgrading from chart 0.0.1: it ran a StatefulSet with a PersistentVolumeClaim. This chart replaces the
+StatefulSet with a Deployment and leaves the claim in place, unused: once you no longer need the state
+in it, delete it yourself (kubectl -n {{ .Release.Namespace }} delete pvc data-{{ include "podium.fullname" . }}-0).
+
 Health, build and metrics (no authentication; keep internal):
-  kubectl -n {{ .Release.Namespace }} port-forward pod/{{ include "podium.fullname" . }}-0 8081:8081
+  kubectl -n {{ .Release.Namespace }} port-forward deploy/{{ include "podium.fullname" . }} 8081:8081
   curl http://127.0.0.1:8081/readyz
   curl http://127.0.0.1:8081/version
 {{- if .Values.ops.service.enabled }}
