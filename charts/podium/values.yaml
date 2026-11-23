@@ -7,10 +7,10 @@
 #           replicas hold no state: one of them leads, through a lease row, and
 #           runs the leader-only work, and the others forward their writes to it.
 #
-# The image defaults to the chart's appVersion, v0.0.1-rc.2: the first podium
-# release with both modes, podium drop-schema and podium schema export. Older
-# images lack them: image.tag or image.digest picks another, v0.0.1-rc.2 or
-# later.
+# The image defaults to the chart's appVersion, v0.0.1-rc.3, the first podium
+# release with workload types. v0.0.1-rc.2 is the first with both modes, podium
+# drop-schema and podium schema export. Older images lack them: image.tag or
+# image.digest picks another, v0.0.1-rc.2 or later.
 #
 # raft is not covered by this chart. Changing the mode of a release changes where
 # the state lives: nothing moves from one to the other.
