@@ -13,7 +13,7 @@ state lives; nothing moves from one to the other.
 
 | | |
 | -- | -- |
-| Image | `ghcr.io/soltihq/podium`, the chart's `appVersion` (`v0.0.1-rc.2`) unless `image.tag` or `image.digest` says otherwise: the first podium release with both modes, `podium drop-schema` and `podium schema export`. Older images lack them |
+| Image | `ghcr.io/soltihq/podium`, the chart's `appVersion` (`v0.0.1-rc.3`, the first podium release with workload types) unless `image.tag` or `image.digest` says otherwise. `v0.0.1-rc.2` is the first with both modes, `podium drop-schema` and `podium schema export`. Older images lack them |
 | Kubernetes | 1.25 or later |
 | Helm | 3.8 or later |
 
@@ -436,8 +436,8 @@ downgrade.
 
 ### Upgrading to workload types
 
-The podium release that replaces the built-in task kinds with workload types,
-declared by the agents (`workload` in a spec, a catalog at
+Podium `v0.0.1-rc.3`, the release that replaces the built-in task kinds with
+workload types declared by the agents (`workload` in a spec, a catalog at
 `/api/v1/workload-types`), changes what an upgrade has to respect. The chart
 needs no value for it: it reads podium's own migrations, so the new table is
 migrated by each `migrate.mode` as before.
@@ -457,14 +457,10 @@ migrated by each `migrate.mode` as before.
   cannot tell them apart: write no spec, in the UI or the API, until
   `kubectl rollout status deployment/<release>` says every replica runs the new
   image. The memory mode's `Recreate` has no such window.
-- **Agents.** Agents on the current SDK do not accept the tasks this podium
-  sends, and send no schemas; deploy no spec to them before they run the SDK
-  that declares workload types. Agent listeners and ports are unchanged.
+- **Agents.** Agents on SDK 0.0.8 or earlier do not accept the tasks this
+  podium sends, and send no schemas; deploy no spec to them before they run SDK
+  0.0.9 or later. Agent listeners and ports are unchanged.
 - **Nothing to migrate.** There are no specs of the earlier shape to carry over.
-
-The image tag is the chart's `appVersion`: `v0.0.1-rc.2` does not contain
-workload types. Until the chart's `appVersion` names the release that does, set
-`image.tag` (or `image.digest`) to it.
 
 ### From the StatefulSet chart
 
